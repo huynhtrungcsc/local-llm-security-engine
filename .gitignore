@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+.env
+*.env.local
+
+# Node / TypeScript
+node_modules/
+dist/
+build/
+.cache/
+*.tsbuildinfo
+.pnpm-store/
+pnpm-lock.yaml
+
+# Test and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage/
+*.lcov
+
+# IDE and OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Ollama local model cache
+.ollama/
