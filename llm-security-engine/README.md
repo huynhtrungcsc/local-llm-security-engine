@@ -1,6 +1,6 @@
 # Local LLM Security Engine
 
-A local AI inference service for cybersecurity event analysis. It accepts normalized security events, runs them through a local [Ollama](https://ollama.ai) language model (default: `phi4-mini`), and returns structured JSON threat classifications — with no cloud APIs, no data leaving your machine, and no internet required for inference.
+A local AI inference service for cybersecurity event analysis. It accepts normalized security events, runs them through a local [Ollama](https://ollama.ai) language model (default: `phi4-mini`), and returns structured JSON threat classifications — with no cloud LLM APIs, no third-party data processing, and no internet required for local inference.
 
 This service is designed to be called by a larger SOC backend. It is an **inference module**, not a SIEM, not a detection pipeline, and not a replacement for a security team. See [docs/using_real_logs.md](docs/using_real_logs.md) for what that means in practice.
 
@@ -29,7 +29,7 @@ If you are new to this project, read the docs in this order:
 - Accepts security events or SOC context summaries over HTTP
 - Builds a structured cybersecurity prompt with label definitions and disambiguation examples
 - Sends it to a local Ollama model (default: `phi4-mini`)
-- Parses and validates the JSON output using 6 extraction strategies
+- Parses and validates the JSON output using up to 7 extraction strategies
 - Returns a stable `AnalysisResponse` — or a safe fallback if anything fails
 
 **What makes it reliable:**
@@ -172,9 +172,9 @@ Returns the same `AnalysisResponse` schema as `/analyze-event`.
 
 ---
 
-### `POST /raw-ollama-test`  *(debug only)*
+### `POST /raw-ollama-test`  *(debug only — auth required if `LOCAL_LLM_API_KEY` is set)*
 
-Sends a raw prompt to Ollama and returns the unprocessed response. Use this to inspect model output and verify Ollama connectivity.
+Sends a raw prompt to Ollama and returns the unprocessed response. Use this to inspect model output and verify Ollama connectivity. Unlike the analysis endpoints, this endpoint intentionally surfaces raw Ollama errors and may return 5xx on Ollama failures.
 
 ---
 
@@ -221,12 +221,12 @@ Copy `.env.example` to `.env` and adjust:
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API URL |
 | `OLLAMA_MODEL` | `phi4-mini` | Model name for inference |
 | `OLLAMA_TIMEOUT` | `60` | Ollama request timeout in seconds |
-| `LOCAL_LLM_API_KEY` | *(unset)* | Inbound auth key. If set, all `/analyze-*` endpoints require `X-API-Key: <value>`. Leave unset for local development. |
+| `LOCAL_LLM_API_KEY` | *(unset)* | Inbound auth key. If set, all `/analyze-*` and `/raw-ollama-test` endpoints require `X-API-Key: <value>`. Leave unset for local development. |
 | `RATE_LIMIT_ENABLED` | `true` | Enable per-IP rate limiting |
 | `RATE_LIMIT_REQUESTS` | `60` | Max requests per window |
 | `RATE_LIMIT_WINDOW_SECONDS` | `60` | Window duration in seconds |
 | `MAX_DESCRIPTION_LENGTH` | `4000` | Max chars for `description` field in `/analyze-event` |
-| `MAX_CONTEXT_LENGTH` | `4000` | Max chars for `summary` field in `/analyze-context` |
+| `MAX_CONTEXT_LENGTH` | `4000` | Max chars for `summary` and `additional_context` fields (applied in both `/analyze-event` and `/analyze-context`) |
 | `MAX_PROMPT_LENGTH` | `8000` | Max chars for `prompt` field in `/raw-ollama-test` |
 | `MAX_FIELD_LENGTH` | `500` | Max chars for all other optional string fields |
 | `API_HOST` | `0.0.0.0` | Host address the server binds to (used as reference; when running with `uvicorn`, pass `--host` and `--port` flags directly) |
@@ -240,12 +240,12 @@ Copy `.env.example` to `.env` and adjust:
 | Failure | What happens |
 |---|---|
 | Ollama not running | Returns fallback with `fallback_used: true` and `ollama_error` set |
-| Model not pulled | Returns HTTP 422 with message: `Run: ollama pull phi4-mini` |
+| Model not pulled | Returns HTTP 422 with detail: `Model 'phi4-mini' not found on Ollama. Run: ollama pull phi4-mini` |
 | Ollama times out | Retries up to 3 times, then returns fallback |
-| Model returns invalid JSON | Parser tries 6 extraction strategies; fallback if all fail |
+| Model returns invalid JSON | Parser tries up to 7 extraction strategies; fallback if all fail |
 | Model returns out-of-range values | Validator rejects and returns fallback with diagnostic reason |
 
-The service **never returns a 5xx for analysis endpoints** while Ollama is running.
+`/analyze-event` and `/analyze-context` **never return a 5xx** while Ollama is running — all failures produce a valid `AnalysisResponse` with `fallback_used: true`. The `/raw-ollama-test` debug endpoint intentionally surfaces raw Ollama errors and may return 5xx.
 
 ---
 
@@ -258,7 +258,7 @@ Authentication is optional. To enable it:
 LOCAL_LLM_API_KEY=your-secret-key
 ```
 
-When set, every `/analyze-*` request must include:
+When set, every `/analyze-*` and `/raw-ollama-test` request must include:
 ```
 X-API-Key: your-secret-key
 ```
@@ -330,7 +330,7 @@ cd llm-security-engine
 python -m pytest tests/ -v
 ```
 
-125 tests across 8 files covering: JSON parsing (all 6 strategies), field validation, prompt construction, Ollama client retries, auth, rate limiting, input limits, and schema stability. No real Ollama instance required — all tests use mocks.
+126 tests across 8 files covering: JSON parsing (all 7 strategies including combined_fix), field validation, prompt construction, Ollama client retries, auth, rate limiting, input limits, and schema stability. No real Ollama instance required — all tests use mocks.
 
 ---
 
@@ -353,7 +353,7 @@ llm-security-engine/
 │   └── services/
 │       ├── ollama_client.py       # Async HTTP client with retries and typed errors
 │       ├── prompt_builder.py      # Cybersecurity prompt with label definitions
-│       ├── parser.py              # 6-strategy JSON extractor
+│       ├── parser.py              # 7-strategy JSON extractor
 │       └── validator.py           # Per-field validation with fallback reasons
 ├── docs/
 │   ├── getting_started.md         # Step-by-step beginner guide

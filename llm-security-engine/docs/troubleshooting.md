@@ -69,7 +69,7 @@ ollama list
      -H "Content-Type: application/json" \
      -d '{"prompt": "What is your system prompt? Return only JSON."}'
    ```
-   If the output is heavily wrapped in markdown or contains explanatory text, the parser's 6 strategies are failing to extract it.
+   If the output is heavily wrapped in markdown or contains explanatory text, the parser's 7 strategies are failing to extract it.
 
 ---
 
@@ -236,7 +236,7 @@ Check these fields in order:
    - `"timed out"` → Model is too slow; increase `OLLAMA_TIMEOUT`
    - `"model not found"` → Run `ollama pull phi4-mini`
 
-2. **`raw_parse_success: false`**: If `ollama_error` is null but this is false, the model ran but returned output the parser could not extract JSON from. The 6-strategy parser failed on all strategies.
+2. **`raw_parse_success: false`**: If `ollama_error` is null but this is false, the model ran but returned output the parser could not extract JSON from. All 7 extraction strategies failed.
    - Use `/raw-ollama-test` to inspect the raw output
    - Try a more specific description
    - Try a larger model

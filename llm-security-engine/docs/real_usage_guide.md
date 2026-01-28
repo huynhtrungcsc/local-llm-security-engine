@@ -163,7 +163,7 @@ When `fallback_used: true`, the reason explains what went wrong:
 |---|---|
 | `model_used` | Which Ollama model produced this result |
 | `raw_parse_success` | Whether the raw model output was valid JSON (false = parser had to repair it) |
-| `parse_strategy` | Which of the 6 extraction strategies succeeded (null if all failed) |
+| `parse_strategy` | Which of the up to 7 extraction strategies succeeded (null if all failed) |
 | `ollama_error` | The error message from Ollama if it failed (null on success) |
 | `request_id` | Trace ID for correlating this response across logs |
 

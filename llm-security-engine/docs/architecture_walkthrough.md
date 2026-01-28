@@ -177,7 +177,7 @@ Every step that can fail returns a safe fallback instead of an error. The servic
 ## Why local inference
 
 Using a local model means:
-- **No data leaves your network** during inference. This matters for security event data, which may contain PII, internal IPs, credentials, or indicators of compromise.
+- **No event data is sent to cloud LLM providers** during inference. All inference runs on the local machine running Ollama. This matters for security event data, which may contain PII, internal IPs, credentials, or indicators of compromise. Note that when the SOC backend communicates with the engine over a Cloudflare Tunnel, event data travels over that encrypted channel to reach the engine — but it never reaches a third-party LLM API.
 - **No per-inference cost**. Cloud APIs charge per token. A local model has a fixed hardware cost.
 - **No dependency on external service availability**. The engine works during cloud outages.
 - **No rate limits from a third party**. Your throughput is only limited by your hardware.

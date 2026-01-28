@@ -111,19 +111,27 @@ async def _run_analysis(prompt: str, request_id: str) -> AnalysisResponse:
     validated = validate_analysis_result(parse_result.data if parse_result else None)
 
     if validated.fallback_used:
+        _log_strategy = parse_result.strategy if parse_result else None
+        if _log_strategy == "none":
+            _log_strategy = None
         log.warning(
             "fallback_used",
             request_id=request_id,
             reason=validated.reason,
-            parse_strategy=parse_result.strategy if parse_result else None,
+            parse_strategy=_log_strategy,
         )
+
+    # Normalize the internal "none" sentinel to JSON null so callers always
+    # receive null (not the string "none") when no parse strategy succeeded.
+    _raw_strategy = parse_result.strategy if parse_result else None
+    _strategy = None if (_raw_strategy is None or _raw_strategy == "none") else _raw_strategy
 
     return AnalysisResponse(
         **validated.model_dump(),
         model_used=model_used,
         provider="ollama",
         raw_parse_success=parse_result.success if parse_result else False,
-        parse_strategy=parse_result.strategy if parse_result else None,
+        parse_strategy=_strategy,
         ollama_error=None,
         request_id=request_id,
     )

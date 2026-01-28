@@ -57,15 +57,17 @@ def extract_json_from_response(raw_text: Optional[str]) -> ParseResult:
     """
     Attempt to extract a valid JSON object from raw Ollama response text.
 
-    Tries multiple strategies in order:
+    Tries up to 7 strategies in order:
     1. Direct parse of the full text
     2. Extract from markdown ```json ... ``` code block
     3. Extract from any bare ``` ... ``` code block
     4. Regex search for the first {...} block in the text
-    5. Apply trailing-comma fix and retry
-    6. Apply single-quote fix and retry
+    5. Apply trailing-comma fix and retry (handles ,} and ,])
+    6. Apply single-quote fix and retry (handles 'key': 'value')
+    7. Apply both fixes combined (handles ,} AND single-quotes together)
 
     Returns a ParseResult with the extracted dict (or None) and metadata.
+    strategy is set to "none" only internally; callers (routes) normalize it to None.
     """
     if not raw_text or not raw_text.strip():
         return ParseResult(data=None, success=False, strategy="none")

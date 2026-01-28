@@ -8,7 +8,7 @@ Design:
 - Configurable via RATE_LIMIT_REQUESTS and RATE_LIMIT_WINDOW_SECONDS env vars.
 - If RATE_LIMIT_ENABLED=false, all requests pass regardless of limits.
 
-Exempt paths (health, docs, redoc, openapi) always bypass the limiter.
+Exempt paths (/health, /debug/ping-ollama, /docs, /redoc, /openapi.json) always bypass the limiter.
 
 Returns HTTP 429 with Retry-After header when the limit is exceeded.
 """

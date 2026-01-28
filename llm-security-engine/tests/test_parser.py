@@ -105,6 +105,15 @@ def test_parse_json_with_single_quotes():
     assert r.strategy == "single_quote_fix"
 
 
+def test_parse_json_with_single_quotes_and_trailing_comma():
+    """Strategy 7: combined fix — both single-quote AND trailing-comma fixes are required."""
+    raw = "{'attack_classification': 'reconnaissance', 'false_positive_likelihood': 0.3, 'risk_score': 60, 'reason': 'Port scan.',}"
+    r = extract_json_from_response(raw)
+    assert r.success is True
+    assert r.data["attack_classification"] == "reconnaissance"
+    assert r.strategy == "combined_fix"
+
+
 # ─── Null field handling ─────────────────────────────────────────────────────
 
 def test_parse_json_with_null_classification():
