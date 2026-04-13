@@ -1,8 +1,14 @@
 /**
  * Provider: Local LLM Security Engine
  *
- * Calls the Local LLM Security Engine (a standalone Python FastAPI service running
- * Ollama locally, typically exposed via Cloudflare Tunnel during development).
+ * Calls the Local LLM Security Engine — a standalone Python FastAPI service
+ * that runs Ollama locally (llm-security-engine/, default port 8000).
+ *
+ * Local development: both this server and the engine run on the same machine.
+ * Set LOCAL_LLM_ENGINE_BASE_URL=http://localhost:8000. No tunnel required.
+ *
+ * Remote deployment: if this SOC backend runs on a cloud server and the engine
+ * runs on a separate local machine, use a Cloudflare Tunnel to bridge them.
  *
  * Integration contract: see llm-security-engine/docs/integration_contract.md
  *

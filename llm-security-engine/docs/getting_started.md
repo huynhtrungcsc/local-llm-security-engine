@@ -291,9 +291,55 @@ You did not pull the model. Run `ollama pull phi4-mini`.
 
 ---
 
+## Step 10 — Connect the SOC backend (optional)
+
+The engine works standalone — you can call it directly with curl and it is fully useful that way. If you also want to run the Node.js SOC API backend (`soc-backend/`) that sits in front of the engine and adds inbound auth, rate limiting, and request tracing:
+
+**In a second terminal**, from the repo root:
+
+```bash
+cd soc-backend
+
+# Copy and configure the env file (only needed the first time)
+# Linux/macOS:
+cp .env.example .env.local
+# Windows:
+copy .env.example .env.local
+
+# The default .env.local already has LOCAL_LLM_ENGINE_BASE_URL=http://localhost:8000
+# No changes needed for local development
+
+pnpm install       # install dependencies (if not done yet)
+pnpm run dev       # starts on port 3000
+```
+
+The SOC backend will connect to the engine you started in Step 6. No tunnel, no cloud account — just two processes on the same machine.
+
+Verify:
+```bash
+curl http://localhost:3000/api/provider-health
+# Expected: "engine_reachable": true
+```
+
+Send an event through the full stack:
+```bash
+curl -X POST http://localhost:3000/api/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "57 failed SSH login attempts followed by one successful login from 185.220.101.1.",
+    "source_ip": "185.220.101.1",
+    "event_type": "authentication_failure",
+    "severity": "high"
+  }'
+```
+
+This goes: `curl → SOC backend (port 3000) → engine (port 8000) → Ollama (port 11434)`.
+
+---
+
 ## What to read next
 
 - [docs/deployment_guide.md](deployment_guide.md) — run as a persistent service on Linux (systemd) or Windows (NSSM)
 - [docs/architecture_walkthrough.md](architecture_walkthrough.md) — understand how all the pieces fit together
 - [docs/real_usage_guide.md](real_usage_guide.md) — how to send real events and interpret responses
-- [docs/end_to_end_integration.md](end_to_end_integration.md) — connect a SOC backend to this service
+- [docs/end_to_end_integration.md](end_to_end_integration.md) — full integration guide (local dev + remote deployment options)

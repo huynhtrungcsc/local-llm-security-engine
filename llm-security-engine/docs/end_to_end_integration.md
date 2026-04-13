@@ -1,90 +1,30 @@
 # End-to-End Integration Guide
 
-This guide explains exactly how to connect the TypeScript SOC API Server to this Python Local LLM Security Engine running on your local machine. It covers startup order, required environment variables, how to verify each layer, and how to debug failures.
+This guide explains how to connect the TypeScript SOC API Server (`soc-backend/`) to the Python Local LLM Security Engine (`llm-security-engine/`).
+
+There are two setups. **Start with Setup A** — it requires no extra tools and works on any developer machine.
 
 ---
 
-## Overview of what you are connecting
+## Setup A — Fully local (recommended for development)
+
+Both services run on the same machine. The SOC backend calls the engine directly over localhost. No tunnel, no cloud account, no extra software.
 
 ```
-SOC API Server           Cloudflare Tunnel         Local LLM Security Engine
-(your server)      →→→  (your machine)    →→→     (your machine, port 8000)
-Express/TypeScript        HTTPS proxy               Python/FastAPI
-                                                          │
-                                                      Ollama (port 11434)
-                                                          │
-                                                      phi4-mini model
+Your machine
+├── Terminal 1 → uvicorn (port 8000) ← Python engine + Ollama
+├── Terminal 2 → pnpm run dev (port 3000) ← SOC API backend
+└── Terminal 3 → curl http://localhost:3000/api/analyze ...
 ```
 
----
+### Prerequisites
 
-## Prerequisites
+- Ollama installed and running (`ollama serve`)
+- `phi4-mini` pulled (`ollama pull phi4-mini`)
+- Python 3.10+ with engine dependencies installed (`pip install -r requirements.txt`)
+- Node.js 20+ with SOC backend dependencies installed (`pnpm install`)
 
-Before starting, confirm you have:
-
-- [ ] Ollama installed and running on your local machine
-- [ ] `phi4-mini` model pulled (`ollama pull phi4-mini`)
-- [ ] Python 3.10+ and dependencies installed in `llm-security-engine/`
-- [ ] `cloudflared` installed ([download here](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/))
-- [ ] The SOC API Server (`soc-backend/`) deployed and running
-
----
-
-## Required environment variables
-
-### On your local machine — Local LLM Security Engine (`.env`)
-
-```env
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=phi4-mini
-OLLAMA_TIMEOUT=60
-
-# Optional: enable auth so only your SOC backend can call the engine
-# LOCAL_LLM_API_KEY=your-engine-secret-key
-```
-
-### On the SOC API Server — `soc-backend/`
-
-Set these in the SOC backend's environment. Create or edit `.env.local` in the `soc-backend/` directory:
-
-```env
-# Required: the tunnel URL printed by cloudflared
-LOCAL_LLM_ENGINE_BASE_URL=https://your-random-name.trycloudflare.com
-
-# Required if LOCAL_LLM_API_KEY is set in the engine's .env
-# LOCAL_LLM_ENGINE_API_KEY=your-engine-secret-key
-
-# Optional: request timeout in milliseconds (default 90000 = 90s)
-# LOCAL_LLM_ENGINE_TIMEOUT_MS=90000
-
-# Optional: protect the SOC API with its own inbound key
-# SOC_API_KEY=your-inbound-secret-key
-```
-
-When `LOCAL_LLM_ENGINE_BASE_URL` is set, the SOC backend automatically switches to `local_security_engine` mode. No need to set `PROVIDER_MODE` explicitly.
-
----
-
-## Exact startup order
-
-Start each component in this order. Each depends on the one before it.
-
-### Step 1 — Start Ollama (if not already running)
-
-On Windows, Ollama starts automatically as a background service after installation. Check the system tray.
-
-On Linux/macOS, if Ollama is not already running:
-```bash
-ollama serve
-```
-
-Verify:
-```bash
-curl http://localhost:11434/api/tags
-```
-You should see a JSON response listing available models.
-
-### Step 2 — Start the Local LLM Security Engine
+### Step 1 — Start the Python engine
 
 ```bash
 cd llm-security-engine
@@ -94,232 +34,244 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 Verify:
 ```bash
 curl http://localhost:8000/health
+# Expected: "status": "ok", "ollama": {"reachable": true}
 ```
 
-Expected: `"status": "ok"` and `"ollama": {"reachable": true}`.
+### Step 2 — Configure the SOC backend
 
-If `ollama.reachable` is `false`, the engine cannot reach Ollama. Go back to Step 1.
+In the `soc-backend/` directory, create `.env.local` (or edit it if it exists):
 
-### Step 3 — Start the Cloudflare Tunnel
+```env
+PORT=3000
+LOCAL_LLM_ENGINE_BASE_URL=http://localhost:8000
+```
 
-In a separate terminal on your local machine:
+That is the entire configuration for local development. No API keys, no tunnel URL.
+
+### Step 3 — Start the SOC backend
+
+```bash
+cd soc-backend
+pnpm run dev
+```
+
+You should see:
+```
+{"level":"info","port":3000,"msg":"Server listening"}
+```
+
+### Step 4 — Verify the connection
+
+Check that the SOC backend can reach the engine:
+
+```bash
+curl http://localhost:3000/api/provider-health
+```
+
+Expected:
+```json
+{
+  "provider_mode": "local_security_engine",
+  "configured_base_url": "http://localhost:8000",
+  "engine_reachable": true,
+  "engine_status": "ok",
+  "model_name": "phi4-mini",
+  "auth_configured": false,
+  "engine_error": null
+}
+```
+
+### Step 5 — Send a test analysis request
+
+```bash
+curl -X POST http://localhost:3000/api/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "57 failed SSH login attempts followed by one successful login from 185.220.101.1.",
+    "source_ip": "185.220.101.1",
+    "event_type": "authentication_failure",
+    "severity": "high"
+  }'
+```
+
+This takes 10–60 seconds while Ollama runs inference. Expected response:
+```json
+{
+  "attack_classification": "credential_access",
+  "risk_score": 88,
+  "false_positive_likelihood": 0.05,
+  "reason": "...",
+  "fallback_used": false,
+  "engine_reachable": true,
+  "soc_provider_mode": "local_security_engine"
+}
+```
+
+Key things to check:
+- `engine_reachable: true` — the SOC backend reached the engine
+- `fallback_used: false` — the full analysis pipeline worked
+- `contract_validation_failed: false` — the response passed schema validation
+
+The full request path: `curl → SOC backend (port 3000) → engine (port 8000) → Ollama (port 11434)`. Everything on localhost.
+
+---
+
+## Setup B — Remote SOC backend (advanced)
+
+Use this only if the SOC backend is deployed to a server and the Python engine runs on a separate local machine. In this case the two services cannot communicate over localhost, so you need a tunnel.
+
+```
+Remote server              Cloudflare Tunnel       Your local machine
+SOC backend (port 3000) → trycloudflare.com →  Python engine (port 8000)
+                                                       │
+                                                 Ollama (port 11434)
+```
+
+### When you need this
+
+- SOC backend is running on a VPS, cloud instance, or any machine that is not the same as the one running Ollama
+- You want to keep inference local (no cloud LLM costs, no data leaving your network)
+
+### When you do NOT need this
+
+- Both services are on the same machine → use Setup A
+
+### Step 1 — Start the Python engine (on your local machine)
+
+```bash
+cd llm-security-engine
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+### Step 2 — Start the Cloudflare Tunnel (on your local machine)
+
+Install `cloudflared` from [developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
+
 ```bash
 cloudflared tunnel --url http://localhost:8000
 ```
 
-Wait for output like:
+Wait for a line like:
 ```
-2024-01-15T10:00:00Z INF +----------------------------+
-2024-01-15T10:00:00Z INF |  Your quick Tunnel has been created! Visit it at  |
-2024-01-15T10:00:00Z INF |  https://random-name.trycloudflare.com            |
-+----------------------------+
+Your quick Tunnel has been created! Visit it at:
+https://random-name.trycloudflare.com
 ```
 
-Copy that URL. You will need it in the next step.
+Copy that URL.
 
-> **The tunnel URL changes every time you restart cloudflared.** For a stable URL that does not change between restarts, you can create a free named tunnel: install `cloudflared`, log in with `cloudflared login`, then create and run a named tunnel with `cloudflared tunnel create my-engine` and `cloudflared tunnel run my-engine`. See the [Cloudflare Tunnel docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/) for the full setup. For most development use, the quick tunnel is fine — just update the URL in the SOC backend's environment after each restart.
+> **The URL changes every restart.** For a stable URL, create a named tunnel with `cloudflared tunnel create my-engine`. See the [Cloudflare Tunnel docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/).
 
-### Step 4 — Configure the SOC backend environment
+### Step 3 — Configure the SOC backend (on the remote server)
 
-On the machine where the SOC backend runs, open `soc-backend/.env.local` and set:
+On the server where the SOC backend runs, set:
 
 ```env
 LOCAL_LLM_ENGINE_BASE_URL=https://random-name.trycloudflare.com
 ```
 
-Replace `random-name` with the actual subdomain printed by cloudflared in Step 3.
+Use `https://` — the tunnel only serves HTTPS.
 
-If you set `LOCAL_LLM_API_KEY` in the engine's `.env`, also add:
-
+If you want the engine to require authentication:
 ```env
-LOCAL_LLM_ENGINE_API_KEY=your-engine-secret-key
+LOCAL_LLM_ENGINE_API_KEY=your-secret-key   # must match engine's LOCAL_LLM_API_KEY
 ```
 
-### Step 5 — Restart the SOC API Server
+### Step 4 — Restart the SOC backend
 
-Environment variables are only loaded when the server starts. After editing `.env.local`, restart the SOC backend process to pick up the new values:
+Environment variables are only loaded at startup:
 
 ```bash
-# If running directly:
-Ctrl+C   # stop
-node dist/index.js   # or: pnpm run dev
+# Direct process:
+Ctrl+C → restart
 
-# If running as a systemd service:
+# systemd:
 sudo systemctl restart soc-api-server
 
-# If running as an NSSM service on Windows:
+# NSSM (Windows):
 nssm restart SocApiServer
 ```
 
-Within a few seconds the server restarts and picks up the new `LOCAL_LLM_ENGINE_BASE_URL`.
-
----
-
-## Verification sequence
-
-After all four components are running, verify from the outside in:
-
-### 1. Verify Ollama is reachable from the engine
-
-```bash
-curl http://localhost:8000/debug/ping-ollama
-```
-
-Expected: `"reachable": true`, `"model_available": true`.
-
-### 2. Verify the tunnel is reachable
-
-```bash
-curl https://your-random-name.trycloudflare.com/health
-```
-
-This should return the same response as calling the local health endpoint. If it times out or returns a Cloudflare error page, the tunnel is not running or the URL is wrong.
-
-### 3. Verify the SOC backend can reach the engine
-
-Call the SOC backend's provider-health endpoint. The URL depends on where your SOC backend is deployed:
+### Step 5 — Verify
 
 ```bash
 curl https://your-soc-server.example.com/api/provider-health
 ```
 
-Expected response:
-```json
-{
-  "provider_mode": "local_security_engine",
-  "configured_base_url": "https://your-random-name.trycloudflare.com",
-  "engine_reachable": true,
-  "engine_status": "ok",
-  "model_name": "phi4-mini",
-  "auth_configured": false,
-  "latency_ms": 320.5,
-  "engine_error": null
-}
-```
-
-If `engine_reachable` is `false`, the SOC backend cannot reach the engine through the tunnel. Check the tunnel URL in the SOC backend's environment variables.
-
-### 4. Verify a full analysis round-trip
-
-```bash
-curl -X POST https://your-soc-server.example.com/api/analyze \
-  -H "Content-Type: application/json" \
-  -H "X-Request-ID: integration-test-001" \
-  -d '{
-    "description": "Outbound connection to known C2 domain every 60 seconds from internal workstation.",
-    "source_ip": "10.0.0.45",
-    "event_type": "dns_lookup",
-    "severity": "high"
-  }'
-```
-
-This request travels: your terminal → SOC backend → Cloudflare Tunnel → local engine → Ollama → back.
-
-It will take 30–90 seconds on a CPU. Expected response:
-```json
-{
-  "attack_classification": "command_and_control",
-  "risk_score": 88,
-  "fallback_used": false,
-  "engine_reachable": true,
-  "contract_validation_failed": false,
-  "soc_provider_mode": "local_security_engine",
-  "request_id": "integration-test-001",
-  ...
-}
-```
-
-Key things to check:
-- `fallback_used: false` — the full analysis pipeline worked
-- `engine_reachable: true` — the engine was reachable through the tunnel
-- `contract_validation_failed: false` — the engine's response passed schema validation
-- `soc_provider_mode: "local_security_engine"` — the SOC backend is in the right mode
+`engine_reachable` should be `true`. If it is `false`, the tunnel URL is wrong or the tunnel is not running.
 
 ---
 
-## How to debug failures
+## Environment variable reference
 
-### `engine_reachable: false` in `/api/provider-health`
+### Python engine (`llm-security-engine/.env`)
 
-The SOC backend cannot reach the engine. Check in order:
-1. Is the engine running? (`curl http://localhost:8000/health` from your local machine)
-2. Is the tunnel running? (`cloudflared tunnel --url http://localhost:8000` in terminal)
-3. Is the tunnel URL correct in the SOC backend's environment? (It changes every time you restart cloudflared)
-4. Did you restart the SOC API Server after updating the URL?
+| Variable | Default | Description |
+|---|---|---|
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
+| `OLLAMA_MODEL` | `phi4-mini` | Model name |
+| `OLLAMA_TIMEOUT` | `60` | Seconds to wait for Ollama |
+| `LOCAL_LLM_API_KEY` | *(unset)* | If set, callers must send `X-API-Key` |
+| `API_PORT` | `8000` | Engine listen port |
+
+### SOC backend (`soc-backend/.env.local`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | *(required)* | SOC backend listen port (e.g. `3000`) |
+| `LOCAL_LLM_ENGINE_BASE_URL` | *(required for analysis)* | Engine URL (`http://localhost:8000` for local dev) |
+| `LOCAL_LLM_ENGINE_API_KEY` | *(unset)* | Must match engine's `LOCAL_LLM_API_KEY` if set |
+| `LOCAL_LLM_ENGINE_TIMEOUT_MS` | `90000` | Request timeout (ms) — increase for slow machines |
+| `SOC_API_KEY` | *(unset)* | If set, callers to SOC backend must send `X-API-Key` |
+
+---
+
+## Debugging failures
+
+### `engine_reachable: false` from `/api/provider-health`
+
+1. Is the Python engine running? → `curl http://localhost:8000/health`
+2. Is `LOCAL_LLM_ENGINE_BASE_URL` correct? → check `.env.local`
+3. (Setup B only) Is the tunnel running and URL correct?
+4. Did you restart the SOC backend after changing env vars?
 
 ### `fallback_used: true` with `engine_error` set
 
-The engine was reachable but failed internally. Check `engine_error`:
+The engine was reachable but failed internally:
+- `"connection refused"` → Ollama is not running → `ollama serve`
+- `"timed out"` → Model is slow → increase `OLLAMA_TIMEOUT` in engine `.env`
+- `"model not found"` → `ollama pull phi4-mini`
 
-- `"Ollama connection refused"` → Start Ollama on your local machine
-- `"Ollama request timed out"` → The model is slow. Increase `LOCAL_LLM_ENGINE_TIMEOUT_MS` in the SOC backend's environment (try `120000` for 2 minutes)
-- `"Model 'phi4-mini' not found"` → Run `ollama pull phi4-mini`
+### `fallback_used: true`, `engine_reachable: false`
 
-### `contract_validation_failed: true`
+The SOC backend cannot reach the engine at all. Go back to Step 1.
 
-The engine returned HTTP 200 but the response body did not match the expected schema. This usually means:
-- The engine is running an old version that does not return all expected fields
-- There is a version mismatch between the SOC backend and the engine
+### HTTP 503 from SOC backend
 
-Check both are running the latest version of the code.
+`LOCAL_LLM_ENGINE_BASE_URL` is not set. Add it to `.env.local` and restart.
 
-### HTTP 401 from the SOC backend
+### HTTP 401 / 403 from SOC backend
 
-The caller is missing the `X-API-Key` header (if `SOC_API_KEY` is configured in the SOC backend).
+`SOC_API_KEY` is set but caller is missing `X-API-Key`. Either add the header or unset `SOC_API_KEY`.
 
-### HTTP 401 from the engine (visible as `engine_error` in the SOC response)
+### HTTP 401 from the engine (shows as `engine_error` in SOC response)
 
-The SOC backend is missing or sending the wrong `LOCAL_LLM_ENGINE_API_KEY`. Compare the value in the SOC backend's `.env.local` with `LOCAL_LLM_API_KEY` in the engine's `.env`.
-
-### HTTP 429
-
-Either the SOC backend or the engine is rate-limiting requests. Check:
-- SOC backend environment for `RATE_LIMIT_MAX` and `RATE_LIMIT_WINDOW_MS`
-- Engine `.env` for `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_WINDOW_SECONDS`
-
----
-
-## Common integration mistakes
-
-**Forgetting to restart the SOC API Server after updating environment variables**
-
-Environment variables are only loaded at startup. After changing any variable, restart the server process.
-
-**Restarting cloudflared without updating `LOCAL_LLM_ENGINE_BASE_URL`**
-
-The quick tunnel URL (`*.trycloudflare.com`) changes every time you restart cloudflared. Update `LOCAL_LLM_ENGINE_BASE_URL` in the SOC backend's environment and restart the SOC API Server.
-
-**Setting `LOCAL_LLM_API_KEY` in the engine but not `LOCAL_LLM_ENGINE_API_KEY` in the SOC backend**
-
-The engine expects a key, the SOC backend does not send one. The engine returns HTTP 401; the SOC backend surfaces this as `fallback_used: true` with `engine_error` mentioning auth.
-
-**Using `http://` instead of `https://` for the tunnel URL**
-
-Cloudflare Tunnel only serves HTTPS. The URL must start with `https://`.
-
-**Calling the engine's `/analyze-event` endpoint directly instead of going through the SOC backend**
-
-This works for testing, but in normal operation the SOC backend handles auth, rate limiting, request ID management, and contract validation for you.
-
-**Very short descriptions**
-
-A description like `"login failure"` gives the model almost no information. Use at least one sentence that includes what happened, from where, and any relevant numbers or identifiers.
+Engine has `LOCAL_LLM_API_KEY` set but SOC backend is not sending it. Add `LOCAL_LLM_ENGINE_API_KEY` to SOC backend `.env.local`.
 
 ---
 
 ## Testing auth end-to-end
 
-If you have set both `SOC_API_KEY` (SOC backend) and `LOCAL_LLM_API_KEY` (engine `.env`):
+If you have enabled authentication on both sides:
 
 ```bash
-# This should return 401 (missing SOC inbound key)
-curl -X POST https://your-soc-server.example.com/api/analyze \
+# Missing SOC key → 401
+curl -X POST http://localhost:3000/api/analyze \
   -H "Content-Type: application/json" \
   -d '{"description": "test"}'
 
-# This should return 200 (correct SOC key, engine key sent transparently by SOC backend)
-curl -X POST https://your-soc-server.example.com/api/analyze \
+# Correct SOC key → 200 (engine key is forwarded transparently)
+curl -X POST http://localhost:3000/api/analyze \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: your-soc-inbound-key" \
-  -d '{"description": "SSH brute force from external IP."}'
+  -H "X-API-Key: your-soc-key" \
+  -d '{"description": "SSH brute force from 185.220.101.1."}'
 ```

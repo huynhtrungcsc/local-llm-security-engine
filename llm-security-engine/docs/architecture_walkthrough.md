@@ -6,83 +6,59 @@ This document explains how all the pieces of this system fit together: what runs
 
 ## The big picture
 
+### Local development (standard setup)
+
+All three components run on the same machine. No tunnel, no cloud account needed.
+
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│  CLOUD (your server — VPS, dedicated, or any networked machine)           │
-│                                                                           │
-│  SOC API Server  (Express / TypeScript)                                   │
-│  soc-backend/                                                             │
-│                                                                           │
-│  Receives alerts from SIEM, analyst tools, or your own automation.       │
-│  Applies inbound auth, rate limiting, and input validation.              │
-│  Calls the Local LLM Security Engine for inference.                      │
-│  Returns structured threat analysis to the caller.                       │
-│                                                                           │
-└──────────────────────────────────────────┬───────────────────────────────┘
-                                           │
-                             HTTPS (Cloudflare Tunnel)
-                             POST /analyze-event
-                             X-API-Key, X-Request-ID
-                                           │
-                                           ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  YOUR LOCAL MACHINE                                                       │
-│                                                                           │
-│  ┌─────────────────────────────────────────────────────────────────┐     │
-│  │  Local LLM Security Engine  (Python / FastAPI)                   │     │
-│  │  llm-security-engine/   — port 8000                             │     │
-│  │                                                                   │     │
-│  │  Receives the event from the SOC backend.                        │     │
-│  │  Builds a structured security prompt.                            │     │
-│  │  Calls Ollama. Parses and validates the response.               │     │
-│  │  Returns AnalysisResponse (or safe fallback).                   │     │
-│  └──────────────────────┬──────────────────────────────────────────┘     │
-│                          │ HTTP (localhost only)                          │
-│                          │ POST /api/generate                            │
-│                          ▼                                               │
-│  ┌─────────────────────────────────────────────────────────────────┐     │
-│  │  Ollama  (local model server)                                    │     │
-│  │  port 11434                                                      │     │
-│  │                                                                   │     │
-│  │  Loads phi4-mini (or another model) into RAM/VRAM.              │     │
-│  │  Runs inference. Returns raw text output.                        │     │
-│  │  No internet connection used at inference time.                  │     │
-│  └─────────────────────────────────────────────────────────────────┘     │
-│                                                                           │
-└──────────────────────────────────────────────────────────────────────────┘
+YOUR MACHINE
+│
+├─ Terminal 1: SOC API Server (Node.js / Express)
+│              soc-backend/  —  port 3000
+│              Receives alerts. Validates input, checks auth, applies rate limits.
+│              Forwards events to the engine at http://localhost:8000.
+│
+│  POST /analyze-event (http, localhost:8000)
+│
+├─ Terminal 2: Local LLM Security Engine (Python / FastAPI)
+│              llm-security-engine/  —  port 8000
+│              Builds structured security prompt.
+│              Calls Ollama. Parses and validates the response.
+│              Returns AnalysisResponse (or safe fallback).
+│
+│  POST /api/generate (http, localhost:11434)
+│
+└─ Background: Ollama (local model server)
+               port 11434
+               Loads phi4-mini into RAM/VRAM. Runs inference.
+               No internet connection at inference time.
 ```
+
+### Remote deployment (optional)
+
+If the SOC backend runs on a separate server, a Cloudflare Tunnel bridges the gap:
+
+```
+Remote server                                    Your local machine
+SOC backend (port 3000)  →  trycloudflare.com  →  Python engine (port 8000)
+                            (Cloudflare Tunnel)        │
+                                                  Ollama (port 11434)
+```
+
+The tunnel daemon on your local machine creates an outbound HTTPS connection to Cloudflare. No firewall rules or port forwarding needed. See `end_to_end_integration.md` Setup B for details.
 
 ---
 
 ## What runs where
 
-| Component | Where it runs | Who manages it |
+| Component | Local dev (Setup A) | Remote deploy (Setup B) |
 |---|---|---|
-| SOC API Server | Cloud server or networked machine | System service / process manager |
-| Cloudflare Tunnel | Your local machine | You (run `cloudflared`) |
-| Local LLM Security Engine | Your local machine | You (run `uvicorn`) |
-| Ollama | Your local machine | Ollama (background service) |
-| phi4-mini model | Your local machine (file on disk) | Ollama |
+| SOC API Server | Your machine, port 3000 | Remote server |
+| Local LLM Security Engine | Your machine, port 8000 | Your machine, port 8000 |
+| Ollama | Your machine, port 11434 | Your machine, port 11434 |
+| Cloudflare Tunnel | Not needed | Your machine (bridges remote → local) |
 
-The SOC backend is in the cloud. Everything else is on your machine. **No event data is forwarded to third-party cloud APIs** — the SOC backend sends events over the tunnel to your local engine, and the engine sends them to Ollama, which never makes outbound network calls. All inference happens locally.
-
----
-
-## What Cloudflare Tunnel does
-
-The SOC API Server runs on a networked server (cloud VPS, dedicated server, or any machine the SOC backend is deployed on). Your Local LLM Security Engine runs on your local machine behind a firewall. These two cannot communicate directly.
-
-Cloudflare Tunnel bridges the gap:
-
-```
-Cloud server → Cloudflare servers → Cloudflare Tunnel daemon → localhost:8000
-```
-
-The tunnel daemon runs on your machine and creates an outbound connection to Cloudflare's servers. When the SOC backend sends a request to the tunnel URL, Cloudflare forwards it through that connection to your local engine. No firewall rules or port forwarding are needed — the connection is initiated from your machine, not from outside.
-
-The tunnel URL looks like: `https://random-name.trycloudflare.com`
-
-This is a development pattern. In production, you would run the engine in a proper server environment accessible to the SOC backend without needing a tunnel.
+**No event data is forwarded to third-party cloud LLM APIs.** The engine sends events to Ollama only — Ollama never makes outbound network calls. All inference is local.
 
 ---
 
@@ -92,7 +68,7 @@ This is a development pattern. In production, you would run the engine in a prop
 
 2. **The SOC backend validates** the request body, checks the inbound API key (if configured), and applies rate limiting.
 
-3. **The SOC backend calls the engine**: it sends a `POST /analyze-event` request to the tunnel URL (or `http://localhost:8000` if both are on the same machine).
+3. **The SOC backend calls the engine**: it sends a `POST /analyze-event` request to the engine URL configured in `LOCAL_LLM_ENGINE_BASE_URL` (`http://localhost:8000` for local development).
 
 4. **The engine receives the event** and builds a structured prompt. The prompt includes:
    - The event fields (description, IPs, severity, etc.)

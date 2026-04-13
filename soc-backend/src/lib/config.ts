@@ -2,8 +2,11 @@
  * Configuration for the SOC API Server.
  *
  * Provider modes:
- *   local_security_engine  — forward analysis requests to a Local LLM Security Engine
- *                            (typically exposed via Cloudflare Tunnel during development)
+ *   local_security_engine  — forward analysis requests to a Local LLM Security Engine.
+ *                            Local development: LOCAL_LLM_ENGINE_BASE_URL=http://localhost:8000
+ *                            (no tunnel needed when both services run on the same machine).
+ *                            Remote deployment: use a Cloudflare Tunnel URL so the
+ *                            remote server can reach the local engine.
  *   none                   — no LLM provider configured; /api/analyze returns 503
  *
  * The active mode is determined automatically:
