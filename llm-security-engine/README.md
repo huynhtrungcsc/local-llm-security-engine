@@ -13,11 +13,12 @@ If you are new to this project, read the docs in this order:
 | Step | File | What it covers |
 |------|------|----------------|
 | 1 | [docs/getting_started.md](docs/getting_started.md) | Prerequisites, installation, first run |
-| 2 | [docs/architecture_walkthrough.md](docs/architecture_walkthrough.md) | How all the pieces fit together |
-| 3 | [docs/real_usage_guide.md](docs/real_usage_guide.md) | How to send events and read responses |
-| 4 | [docs/end_to_end_integration.md](docs/end_to_end_integration.md) | Connecting a SOC backend on Replit to this engine |
-| 5 | [docs/troubleshooting.md](docs/troubleshooting.md) | Diagnosing errors, fallbacks, and connectivity issues |
-| 6 | [docs/using_real_logs.md](docs/using_real_logs.md) | How to use this with real log sources |
+| 2 | [docs/deployment_guide.md](docs/deployment_guide.md) | Run as a persistent service on Linux (systemd) or Windows (NSSM) |
+| 3 | [docs/architecture_walkthrough.md](docs/architecture_walkthrough.md) | How all the pieces fit together |
+| 4 | [docs/real_usage_guide.md](docs/real_usage_guide.md) | How to send events and read responses |
+| 5 | [docs/end_to_end_integration.md](docs/end_to_end_integration.md) | Connecting a SOC backend to this engine |
+| 6 | [docs/troubleshooting.md](docs/troubleshooting.md) | Diagnosing errors, fallbacks, and connectivity issues |
+| 7 | [docs/using_real_logs.md](docs/using_real_logs.md) | How to use this with real log sources |
 | — | [docs/integration_contract.md](docs/integration_contract.md) | Stable API contract for downstream consumers |
 | — | [docs/production_gap.md](docs/production_gap.md) | What is missing before production SOC deployment |
 

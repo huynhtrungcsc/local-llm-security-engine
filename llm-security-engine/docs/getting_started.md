@@ -268,7 +268,7 @@ The test suite runs entirely with mocks — no running server or Ollama instance
 python -m pytest tests/ -v
 ```
 
-You should see 125 tests all pass.
+You should see 126 tests all pass.
 
 ---
 
@@ -293,6 +293,7 @@ You did not pull the model. Run `ollama pull phi4-mini`.
 
 ## What to read next
 
+- [docs/deployment_guide.md](deployment_guide.md) — run as a persistent service on Linux (systemd) or Windows (NSSM)
 - [docs/architecture_walkthrough.md](architecture_walkthrough.md) — understand how all the pieces fit together
 - [docs/real_usage_guide.md](real_usage_guide.md) — how to send real events and interpret responses
 - [docs/end_to_end_integration.md](end_to_end_integration.md) — connect a SOC backend to this service

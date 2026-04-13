@@ -102,7 +102,7 @@ This is a development pattern. In production, you would run the engine in a prop
 
 5. **The engine calls Ollama** via HTTP on localhost. Ollama loads `phi4-mini` into RAM (or VRAM if a GPU is available) and runs inference. This is the slow step — it takes 10–60 seconds on a CPU.
 
-6. **Ollama returns raw text**. The model almost always returns JSON, but sometimes wraps it in markdown code fences, adds explanatory text, or uses single quotes instead of double quotes. The engine's parser tries 6 different extraction strategies to handle this.
+6. **Ollama returns raw text**. The model almost always returns JSON, but sometimes wraps it in markdown code fences, adds explanatory text, or uses single quotes instead of double quotes. The engine's parser tries 7 different extraction strategies to handle this.
 
 7. **The parser returns a dict** (or `None` if it could not extract valid JSON). The validator checks every field: is the attack classification one of the 7 allowed values? Is the risk score an integer between 0 and 100? Is the reason a non-empty string?
 
@@ -161,7 +161,7 @@ build_event_prompt()     — constructs the structured security prompt
 query_ollama()           — async HTTP to localhost:11434/api/generate (retries up to 3x)
         │
         ▼
-extract_json_from_response()  — tries 6 JSON extraction strategies
+extract_json_from_response()  — tries 7 JSON extraction strategies
         │
         ▼
 validate_analysis_result()    — checks every field; returns fallback if any fail
