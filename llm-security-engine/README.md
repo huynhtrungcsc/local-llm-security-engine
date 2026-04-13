@@ -49,7 +49,7 @@ If you are new to this project, read the docs in this order:
 ## Quick Start
 
 ```bash
-# 1. Install Ollama and pull the model (on your local machine)
+# 1. Install Ollama and pull a model (phi4-mini is the default — see "Choosing a Model" below)
 ollama pull phi4-mini
 
 # 2. Install Python dependencies
@@ -67,6 +67,35 @@ curl http://localhost:8000/health
 ```
 
 Full step-by-step instructions: [docs/getting_started.md](docs/getting_started.md)
+
+---
+
+## Choosing a Model
+
+> **The model is not hardcoded.** `phi4-mini` is the default for getting started quickly, but the engine is designed to work with any Ollama-compatible model. For production SOC deployments, a larger model will give significantly better accuracy. Change `OLLAMA_MODEL` in your `.env` and restart — no code changes needed.
+
+| Model | RAM needed | Speed (CPU) | Accuracy | Best for |
+|---|---|---|---|---|
+| `phi4-mini` | ~3 GB | 15–30 s | Good | Development, low-resource machines |
+| `phi4` | ~9 GB | 45–90 s | Very good | General use without GPU |
+| `mistral` | ~5 GB | 30–60 s | Very good | Balanced — reliable and fast |
+| `llama3.1:8b` | ~8 GB | 45–90 s | Excellent | High-accuracy analysis on CPU |
+| `llama3.1:70b` | ~43 GB | requires GPU | Best | Production with dedicated GPU server |
+| `qwen2.5:72b` | ~45 GB | requires GPU | Best | Strong multilingual + security reasoning |
+
+**To switch models:**
+
+```bash
+# 1. Pull the new model
+ollama pull mistral
+
+# 2. Update .env
+OLLAMA_MODEL=mistral
+
+# 3. Restart the server — the engine picks up the new model automatically
+```
+
+The engine validates and parses the model output regardless of which model you use. If a model returns malformed JSON, the parser tries 7 extraction strategies before falling back to safe defaults — so switching models never crashes the service.
 
 ---
 
