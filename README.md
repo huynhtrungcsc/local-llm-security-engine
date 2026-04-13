@@ -113,6 +113,9 @@ All analysis endpoints return the same stable `AnalysisResponse` schema. Ollama 
 | [End-to-end integration](llm-security-engine/docs/end_to_end_integration.md) | Connecting both services over a Cloudflare Tunnel |
 | [Troubleshooting](llm-security-engine/docs/troubleshooting.md) | Common errors and how to fix them |
 | [Using real logs](llm-security-engine/docs/using_real_logs.md) | Adapting Suricata / Zeek / Syslog output |
+| [Wazuh integration](llm-security-engine/docs/integration_wazuh.md) | Connect Wazuh alerts to the engine; write results back to Elasticsearch |
+| [Elastic SIEM integration](llm-security-engine/docs/integration_elk.md) | Connect Elastic SIEM detection alerts; Logstash pipeline option |
+| [Splunk integration](llm-security-engine/docs/integration_splunk.md) | Polling script, HEC output, and Splunk Custom Alert Action adapter |
 | [Integration contract](llm-security-engine/docs/integration_contract.md) | Field-level API contract between services |
 | [Production gap](llm-security-engine/docs/production_gap.md) | What is missing before production SOC deployment |
 

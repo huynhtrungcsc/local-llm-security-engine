@@ -21,6 +21,9 @@ If you are new to this project, read the docs in this order:
 | 7 | [docs/using_real_logs.md](docs/using_real_logs.md) | How to use this with real log sources |
 | — | [docs/integration_contract.md](docs/integration_contract.md) | Stable API contract for downstream consumers |
 | — | [docs/production_gap.md](docs/production_gap.md) | What is missing before production SOC deployment |
+| — | [docs/integration_wazuh.md](docs/integration_wazuh.md) | Step-by-step Wazuh integration with polling script and Kibana dashboard |
+| — | [docs/integration_elk.md](docs/integration_elk.md) | Step-by-step Elastic SIEM integration with polling script and Logstash option |
+| — | [docs/integration_splunk.md](docs/integration_splunk.md) | Step-by-step Splunk integration: polling script, HEC output, and custom alert action |
 
 ---
 

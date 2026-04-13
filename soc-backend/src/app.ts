@@ -26,8 +26,10 @@ app.use(
   }),
 );
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Body size limit: field-level validation caps the total payload well under 50 KB,
+// but we set this explicitly so it is visible and not relying on Express's hidden default.
+app.use(express.json({ limit: "50kb" }));
+app.use(express.urlencoded({ extended: true, limit: "50kb" }));
 
 app.use("/api", router);
 

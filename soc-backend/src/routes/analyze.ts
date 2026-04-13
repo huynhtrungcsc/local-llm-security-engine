@@ -120,6 +120,7 @@ router.post("/analyze", apiKeyAuth, analyzeRateLimiter, async (req: Request, res
       { request_id: requestId, errors: validation.errors },
       "analyze_input_validation_failed",
     );
+    res.setHeader("X-Request-ID", requestId);
     res.status(422).json({
       error: "validation_error",
       detail: "Request body failed validation.",
@@ -137,6 +138,7 @@ router.post("/analyze", apiKeyAuth, analyzeRateLimiter, async (req: Request, res
       { request_id: requestId, provider_mode: "none" },
       "analyze_no_provider_configured",
     );
+    res.setHeader("X-Request-ID", requestId);
     res.status(503).json({
       error: "no_provider_configured",
       detail:
