@@ -329,7 +329,7 @@ export SOC_API_KEY=your-inbound-secret-key
 ### Step 5 — Start the SOC backend
 
 ```bash
-cd artifacts/api-server
+cd soc-backend
 pnpm run dev
 ```
 
@@ -352,7 +352,7 @@ curl -X POST http://localhost:$PORT/api/analyze \
 ## Running Tests
 
 ```bash
-cd artifacts/api-server
+cd soc-backend
 pnpm run test
 ```
 

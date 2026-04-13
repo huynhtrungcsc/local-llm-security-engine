@@ -14,6 +14,17 @@ The whole process takes about 10–15 minutes, depending on your download speed.
 
 ---
 
+## Step 0 — Clone the repository
+
+```bash
+git clone https://github.com/huynhtrungcsc/local-llm-security-engine.git
+cd local-llm-security-engine
+```
+
+The Python engine lives in `llm-security-engine/` and the SOC backend in `soc-backend/`. You can use both together or the Python engine standalone.
+
+---
+
 ## Step 1 — Prerequisites
 
 Before you start, check you have these installed:
@@ -295,6 +306,14 @@ You did not pull the model. Run `ollama pull phi4-mini`.
 
 The engine works standalone — you can call it directly with curl and it is fully useful that way. If you also want to run the Node.js SOC API backend (`soc-backend/`) that sits in front of the engine and adds inbound auth, rate limiting, and request tracing:
 
+**Prerequisites for the SOC backend:**
+
+- **Node.js 20 or newer**: check with `node --version`. Download from [nodejs.org](https://nodejs.org/en/download).
+- **pnpm**: check with `pnpm --version`. Install with:
+  ```bash
+  npm install -g pnpm
+  ```
+
 **In a second terminal**, from the repo root:
 
 ```bash
@@ -306,10 +325,10 @@ cp .env.example .env.local
 # Windows:
 copy .env.example .env.local
 
-# The default .env.local already has LOCAL_LLM_ENGINE_BASE_URL=http://localhost:8000
+# The default .env.local already has PORT=3000 and LOCAL_LLM_ENGINE_BASE_URL=http://localhost:8000
 # No changes needed for local development
 
-pnpm install       # install dependencies (if not done yet)
+pnpm install       # install dependencies (first time only)
 pnpm run dev       # starts on port 3000
 ```
 

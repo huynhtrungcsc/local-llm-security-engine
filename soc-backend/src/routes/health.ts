@@ -1,5 +1,4 @@
 import { Router, type IRouter, type Request } from "express";
-import { HealthCheckResponse } from "@workspace/api-zod";
 import { getConfig } from "../lib/config.js";
 import { getLocalEngineClient } from "../providers/localSecurityEngine.js";
 import { logger } from "../lib/logger.js";
@@ -13,8 +12,7 @@ const router: IRouter = Router();
  * Use /api/provider-health for detailed provider connectivity status.
  */
 router.get("/healthz", (_req, res) => {
-  const data = HealthCheckResponse.parse({ status: "ok" });
-  res.json(data);
+  res.json({ status: "ok" });
 });
 
 /**

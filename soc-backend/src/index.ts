@@ -1,11 +1,13 @@
-import app from "./app";
-import { logger } from "./lib/logger";
+import "./env.js"; // MUST be first — loads .env.local before any module reads process.env
+import app from "./app.js";
+import { logger } from "./lib/logger.js";
 
 const rawPort = process.env["PORT"];
 
 if (!rawPort) {
   throw new Error(
-    "PORT environment variable is required but was not provided.",
+    "PORT environment variable is required but was not provided.\n" +
+    "Copy .env.example to .env.local and set PORT=3000 (or any free port).",
   );
 }
 
