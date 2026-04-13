@@ -119,22 +119,31 @@ This should return the same output as `curl http://localhost:8000/health`.
 
 **Diagnosis steps**:
 
-1. Is the engine running locally?
+1. Is the engine running?
    ```bash
    curl http://localhost:8000/health
    ```
+   If `connection refused`: start the engine with `uvicorn app.main:app --host 0.0.0.0 --port 8000`.
 
-2. Is the tunnel running and is the URL correct?
+2. Is `LOCAL_LLM_ENGINE_BASE_URL` set correctly in the SOC backend's `.env.local`?
+
+   **Local development** (both services on the same machine):
+   ```env
+   LOCAL_LLM_ENGINE_BASE_URL=http://localhost:8000
+   ```
+   Uses `http://`, not `https://`.
+
+   **Remote deployment** (SOC backend on a separate server, using a Cloudflare Tunnel):
+   ```env
+   LOCAL_LLM_ENGINE_BASE_URL=https://random-name.trycloudflare.com
+   ```
+   Uses `https://`. Also verify the tunnel is running:
    ```bash
-   curl https://the-url-in-your-env/health
+   curl https://random-name.trycloudflare.com/health
    ```
 
-3. Is `LOCAL_LLM_ENGINE_BASE_URL` correct in the SOC backend's environment?
-   - It must start with `https://`, not `http://`
-   - Check the SOC backend's `.env.local` file
-
-4. Did you restart the SOC API Server after updating the URL?
-   - Environment variables are only loaded at startup
+3. Did you restart the SOC API Server after changing the URL?
+   Environment variables are only loaded at startup — a restart is required.
 
 ---
 

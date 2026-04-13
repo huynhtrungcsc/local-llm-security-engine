@@ -274,9 +274,11 @@ The following endpoints are always public (no auth required):
 
 ---
 
-## Exposing via Cloudflare Tunnel (Development)
+## Exposing via Cloudflare Tunnel (Remote SOC backend only)
 
-To allow a remote SOC backend to reach your local service:
+**This is only needed when your SOC backend runs on a separate machine from the engine.** If both run on the same machine, the SOC backend calls `http://localhost:8000` directly — no tunnel required.
+
+If the SOC backend is deployed to a remote server and needs to reach this local engine:
 
 ```bash
 # Install cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
@@ -284,9 +286,7 @@ cloudflared tunnel --url http://localhost:8000
 # Prints: https://random-name.trycloudflare.com
 ```
 
-Your SOC backend can then call `https://random-name.trycloudflare.com/analyze-event`.
-
-The tunnel is end-to-end encrypted — no firewall rules or port forwarding needed. This is a development pattern; see [docs/production_gap.md](docs/production_gap.md) for what a production setup requires.
+Set `LOCAL_LLM_ENGINE_BASE_URL=https://random-name.trycloudflare.com` in the SOC backend's environment. The tunnel is end-to-end encrypted — no firewall rules or port forwarding needed. See [docs/end_to_end_integration.md](docs/end_to_end_integration.md) Setup B for the full walkthrough.
 
 ---
 
