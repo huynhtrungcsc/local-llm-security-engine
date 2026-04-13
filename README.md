@@ -48,10 +48,11 @@ pip install -r requirements.txt
 cp .env.example .env          # edit OLLAMA_MODEL, API key, etc.
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-# 2. Start the SOC Backend (separate terminal)
+# 2. Start the SOC Backend (separate terminal, needs Node.js 20+ and pnpm)
 cd soc-backend
-npm install
-LOCAL_LLM_ENGINE_BASE_URL=http://localhost:8000 npm run dev
+pnpm install
+cp .env.example .env.local   # PORT=3000 + LOCAL_LLM_ENGINE_BASE_URL already set
+pnpm run dev
 ```
 
 Full setup guide: [`llm-security-engine/docs/getting_started.md`](llm-security-engine/docs/getting_started.md)
@@ -97,7 +98,8 @@ All analysis endpoints return the same stable `AnalysisResponse` schema. Ollama 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `POST` | `/api/analyze` | Optional | Receive a security alert and return engine analysis |
-| `GET` | `/api/health` | None | Service health check |
+| `GET` | `/api/healthz` | None | Liveness check — always returns `{"status":"ok"}` |
+| `GET` | `/api/provider-health` | None | Engine connectivity probe with model and latency info |
 
 ---
 
@@ -126,8 +128,8 @@ python -m pytest tests/ -v
 
 # SOC Backend — 92 unit tests
 cd soc-backend
-npm install
-npm run test
+pnpm install
+pnpm run test
 ```
 
 All tests use mocks — no running Ollama instance required.
