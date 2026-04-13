@@ -1,6 +1,6 @@
 # End-to-End Integration Guide
 
-This guide explains exactly how to connect the TypeScript SOC API Server (on Replit) to this Python Local LLM Security Engine (on your local machine). It covers startup order, required environment variables, how to verify each layer, and how to debug failures.
+This guide explains exactly how to connect the TypeScript SOC API Server to this Python Local LLM Security Engine running on your local machine. It covers startup order, required environment variables, how to verify each layer, and how to debug failures.
 
 ---
 
@@ -8,7 +8,7 @@ This guide explains exactly how to connect the TypeScript SOC API Server (on Rep
 
 ```
 SOC API Server           Cloudflare Tunnel         Local LLM Security Engine
-(Replit, cloud)    →→→  (your machine)    →→→     (your machine, port 8000)
+(your server)      →→→  (your machine)    →→→     (your machine, port 8000)
 Express/TypeScript        HTTPS proxy               Python/FastAPI
                                                           │
                                                       Ollama (port 11434)
@@ -26,7 +26,7 @@ Before starting, confirm you have:
 - [ ] `phi4-mini` model pulled (`ollama pull phi4-mini`)
 - [ ] Python 3.10+ and dependencies installed in `llm-security-engine/`
 - [ ] `cloudflared` installed ([download here](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/))
-- [ ] The SOC API Server running on Replit (`artifacts/api-server/`)
+- [ ] The SOC API Server (`soc-backend/`) deployed and running
 
 ---
 
@@ -43,9 +43,9 @@ OLLAMA_TIMEOUT=60
 # LOCAL_LLM_API_KEY=your-engine-secret-key
 ```
 
-### On Replit — SOC API Server
+### On the SOC API Server — `soc-backend/`
 
-Set these in the Replit Secrets panel (or in a `.env` file):
+Set these in the SOC backend's environment. Create or edit `.env.local` in the `soc-backend/` directory:
 
 ```env
 # Required: the tunnel URL printed by cloudflared
@@ -117,31 +117,41 @@ Wait for output like:
 
 Copy that URL. You will need it in the next step.
 
-> **The tunnel URL changes every time you restart cloudflared.** For a stable URL that does not change between restarts, you can create a free named tunnel: install `cloudflared`, log in with `cloudflared login`, then create and run a named tunnel with `cloudflared tunnel create my-engine` and `cloudflared tunnel run my-engine`. See the [Cloudflare Tunnel docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/) for the full setup. For most development use, the quick tunnel is fine — just update the URL in Replit Secrets after each restart.
+> **The tunnel URL changes every time you restart cloudflared.** For a stable URL that does not change between restarts, you can create a free named tunnel: install `cloudflared`, log in with `cloudflared login`, then create and run a named tunnel with `cloudflared tunnel create my-engine` and `cloudflared tunnel run my-engine`. See the [Cloudflare Tunnel docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/) for the full setup. For most development use, the quick tunnel is fine — just update the URL in the SOC backend's environment after each restart.
 
-### Step 4 — Configure the SOC backend on Replit
+### Step 4 — Configure the SOC backend environment
 
-In Replit, open the **Secrets** panel (the padlock icon in the left sidebar). Add a secret:
-```
-Key:   LOCAL_LLM_ENGINE_BASE_URL
-Value: https://random-name.trycloudflare.com
+On the machine where the SOC backend runs, open `soc-backend/.env.local` and set:
+
+```env
+LOCAL_LLM_ENGINE_BASE_URL=https://random-name.trycloudflare.com
 ```
 
 Replace `random-name` with the actual subdomain printed by cloudflared in Step 3.
 
 If you set `LOCAL_LLM_API_KEY` in the engine's `.env`, also add:
+
+```env
+LOCAL_LLM_ENGINE_API_KEY=your-engine-secret-key
 ```
-Key:   LOCAL_LLM_ENGINE_API_KEY
-Value: your-engine-secret-key
+
+### Step 5 — Restart the SOC API Server
+
+Environment variables are only loaded when the server starts. After editing `.env.local`, restart the SOC backend process to pick up the new values:
+
+```bash
+# If running directly:
+Ctrl+C   # stop
+node dist/index.js   # or: pnpm run dev
+
+# If running as a systemd service:
+sudo systemctl restart soc-api-server
+
+# If running as an NSSM service on Windows:
+nssm restart SocApiServer
 ```
 
-### Step 5 — Restart the SOC API Server on Replit
-
-Environment variables are only loaded when the server starts. You must restart the workflow to pick up the new secrets.
-
-In Replit, find the **Workflows** panel (usually visible as a running process indicator). Click the stop button on the `API Server` workflow, then click start again. Or use the restart button if your Replit version shows one. Within a few seconds, the server restarts and picks up the new `LOCAL_LLM_ENGINE_BASE_URL`.
-
-> **If you are unsure where to find this**, look in the top-right area of the Replit interface for a panel labelled "Shell", "Console", or a ▶ play button for the API Server workflow.
+Within a few seconds the server restarts and picks up the new `LOCAL_LLM_ENGINE_BASE_URL`.
 
 ---
 
@@ -167,10 +177,10 @@ This should return the same response as calling the local health endpoint. If it
 
 ### 3. Verify the SOC backend can reach the engine
 
-Call the SOC backend's provider-health endpoint on Replit. To find your Replit app URL: open the Replit project, click the **webview** or **preview** pane, and copy the URL shown there. It usually looks like `https://your-project-name.your-username.replit.app` or just `https://your-project-name.replit.app`.
+Call the SOC backend's provider-health endpoint. The URL depends on where your SOC backend is deployed:
 
 ```bash
-curl https://your-replit-app.replit.app/api/provider-health
+curl https://your-soc-server.example.com/api/provider-health
 ```
 
 Expected response:
@@ -187,12 +197,12 @@ Expected response:
 }
 ```
 
-If `engine_reachable` is `false`, the SOC backend cannot reach the engine through the tunnel. Check the tunnel URL in Replit Secrets.
+If `engine_reachable` is `false`, the SOC backend cannot reach the engine through the tunnel. Check the tunnel URL in the SOC backend's environment variables.
 
 ### 4. Verify a full analysis round-trip
 
 ```bash
-curl -X POST https://your-replit-app.replit.app/api/analyze \
+curl -X POST https://your-soc-server.example.com/api/analyze \
   -H "Content-Type: application/json" \
   -H "X-Request-ID: integration-test-001" \
   -d '{
@@ -203,7 +213,7 @@ curl -X POST https://your-replit-app.replit.app/api/analyze \
   }'
 ```
 
-This request travels: your terminal → Replit SOC backend → Cloudflare Tunnel → local engine → Ollama → back.
+This request travels: your terminal → SOC backend → Cloudflare Tunnel → local engine → Ollama → back.
 
 It will take 30–90 seconds on a CPU. Expected response:
 ```json
@@ -234,7 +244,7 @@ Key things to check:
 The SOC backend cannot reach the engine. Check in order:
 1. Is the engine running? (`curl http://localhost:8000/health` from your local machine)
 2. Is the tunnel running? (`cloudflared tunnel --url http://localhost:8000` in terminal)
-3. Is the tunnel URL correct in Replit Secrets? (It changes every time you restart cloudflared)
+3. Is the tunnel URL correct in the SOC backend's environment? (It changes every time you restart cloudflared)
 4. Did you restart the SOC API Server after updating the URL?
 
 ### `fallback_used: true` with `engine_error` set
@@ -242,7 +252,7 @@ The SOC backend cannot reach the engine. Check in order:
 The engine was reachable but failed internally. Check `engine_error`:
 
 - `"Ollama connection refused"` → Start Ollama on your local machine
-- `"Ollama request timed out"` → The model is slow. Increase `LOCAL_LLM_ENGINE_TIMEOUT_MS` in Replit Secrets (try `120000` for 2 minutes)
+- `"Ollama request timed out"` → The model is slow. Increase `LOCAL_LLM_ENGINE_TIMEOUT_MS` in the SOC backend's environment (try `120000` for 2 minutes)
 - `"Model 'phi4-mini' not found"` → Run `ollama pull phi4-mini`
 
 ### `contract_validation_failed: true`
@@ -255,31 +265,31 @@ Check both are running the latest version of the code.
 
 ### HTTP 401 from the SOC backend
 
-The caller is missing the `X-API-Key` header (if `SOC_API_KEY` is set on Replit).
+The caller is missing the `X-API-Key` header (if `SOC_API_KEY` is configured in the SOC backend).
 
 ### HTTP 401 from the engine (visible as `engine_error` in the SOC response)
 
-The SOC backend is missing or sending the wrong `LOCAL_LLM_ENGINE_API_KEY`. Compare the value in Replit Secrets with `LOCAL_LLM_API_KEY` in the engine's `.env`.
+The SOC backend is missing or sending the wrong `LOCAL_LLM_ENGINE_API_KEY`. Compare the value in the SOC backend's `.env.local` with `LOCAL_LLM_API_KEY` in the engine's `.env`.
 
 ### HTTP 429
 
 Either the SOC backend or the engine is rate-limiting requests. Check:
-- Replit Secrets for `RATE_LIMIT_MAX` and `RATE_LIMIT_WINDOW_MS` (SOC backend limits)
+- SOC backend environment for `RATE_LIMIT_MAX` and `RATE_LIMIT_WINDOW_MS`
 - Engine `.env` for `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_WINDOW_SECONDS`
 
 ---
 
 ## Common integration mistakes
 
-**Forgetting to restart the SOC API Server after updating Replit Secrets**
+**Forgetting to restart the SOC API Server after updating environment variables**
 
-Environment variables are only loaded at startup. After changing any secret, restart the workflow.
+Environment variables are only loaded at startup. After changing any variable, restart the server process.
 
-**Restarting cloudflared without updating the URL in Replit Secrets**
+**Restarting cloudflared without updating `LOCAL_LLM_ENGINE_BASE_URL`**
 
-The quick tunnel URL (`*.trycloudflare.com`) changes every time you restart cloudflared. Update `LOCAL_LLM_ENGINE_BASE_URL` in Replit Secrets and restart the SOC API Server.
+The quick tunnel URL (`*.trycloudflare.com`) changes every time you restart cloudflared. Update `LOCAL_LLM_ENGINE_BASE_URL` in the SOC backend's environment and restart the SOC API Server.
 
-**Setting `LOCAL_LLM_API_KEY` in the engine but not `LOCAL_LLM_ENGINE_API_KEY` in Replit**
+**Setting `LOCAL_LLM_API_KEY` in the engine but not `LOCAL_LLM_ENGINE_API_KEY` in the SOC backend**
 
 The engine expects a key, the SOC backend does not send one. The engine returns HTTP 401; the SOC backend surfaces this as `fallback_used: true` with `engine_error` mentioning auth.
 
@@ -299,16 +309,16 @@ A description like `"login failure"` gives the model almost no information. Use 
 
 ## Testing auth end-to-end
 
-If you have set both `SOC_API_KEY` (Replit) and `LOCAL_LLM_API_KEY` (engine `.env`):
+If you have set both `SOC_API_KEY` (SOC backend) and `LOCAL_LLM_API_KEY` (engine `.env`):
 
 ```bash
 # This should return 401 (missing SOC inbound key)
-curl -X POST https://your-replit-app.replit.app/api/analyze \
+curl -X POST https://your-soc-server.example.com/api/analyze \
   -H "Content-Type: application/json" \
   -d '{"description": "test"}'
 
 # This should return 200 (correct SOC key, engine key sent transparently by SOC backend)
-curl -X POST https://your-replit-app.replit.app/api/analyze \
+curl -X POST https://your-soc-server.example.com/api/analyze \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-soc-inbound-key" \
   -d '{"description": "SSH brute force from external IP."}'

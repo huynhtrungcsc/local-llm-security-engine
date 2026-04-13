@@ -101,7 +101,7 @@ If it crashes immediately, look at the error output. Common causes:
 **Causes and fixes**:
 
 1. **Tunnel is not running**: Start it: `cloudflared tunnel --url http://localhost:8000`
-2. **Tunnel URL changed**: The quick tunnel URL changes every time you restart cloudflared. Copy the new URL from the terminal and update `LOCAL_LLM_ENGINE_BASE_URL` in Replit Secrets.
+2. **Tunnel URL changed**: The quick tunnel URL changes every time you restart cloudflared. Copy the new URL from the terminal and update `LOCAL_LLM_ENGINE_BASE_URL` in the SOC backend's environment.
 3. **Local engine is not running**: The tunnel is running but nothing is listening on port 8000. Start the engine first, then the tunnel.
 4. **Cloudflare outage**: Very rare. Check [cloudflarestatus.com](https://www.cloudflarestatus.com).
 
@@ -126,15 +126,15 @@ This should return the same output as `curl http://localhost:8000/health`.
 
 2. Is the tunnel running and is the URL correct?
    ```bash
-   curl https://the-url-in-your-secrets/health
+   curl https://the-url-in-your-env/health
    ```
 
-3. Does Replit Secrets have the correct URL?
-   - Open Replit → Secrets → check `LOCAL_LLM_ENGINE_BASE_URL`
+3. Is `LOCAL_LLM_ENGINE_BASE_URL` correct in the SOC backend's environment?
    - It must start with `https://`, not `http://`
+   - Check the SOC backend's `.env.local` file
 
 4. Did you restart the SOC API Server after updating the URL?
-   - Secrets are only loaded at startup
+   - Environment variables are only loaded at startup
 
 ---
 
@@ -151,7 +151,7 @@ This should return the same output as `curl http://localhost:8000/health`.
 
 **Fix**:
 - If calling the engine directly for testing: add `-H "X-API-Key: your-key"` to your curl command.
-- If calling through the SOC backend: set `LOCAL_LLM_ENGINE_API_KEY=your-key` in Replit Secrets and restart the SOC backend.
+- If calling through the SOC backend: add `LOCAL_LLM_ENGINE_API_KEY=your-key` to the SOC backend's `.env.local` and restart it.
 - If you do not need auth for local development: remove or comment out `LOCAL_LLM_API_KEY` in the engine's `.env`.
 
 ---
@@ -165,7 +165,7 @@ This should return the same output as `curl http://localhost:8000/health`.
 
 **Cause**: An `X-API-Key` header was sent, but its value does not match `LOCAL_LLM_API_KEY`.
 
-**Fix**: Verify the value in Replit Secrets (`LOCAL_LLM_ENGINE_API_KEY`) exactly matches the value in the engine's `.env` (`LOCAL_LLM_API_KEY`). Check for leading/trailing spaces.
+**Fix**: Verify `LOCAL_LLM_ENGINE_API_KEY` in the SOC backend's `.env.local` exactly matches `LOCAL_LLM_API_KEY` in the engine's `.env`. Check for leading/trailing spaces.
 
 ---
 
@@ -173,17 +173,17 @@ This should return the same output as `curl http://localhost:8000/health`.
 
 **Symptom**: SOC backend returns 401 when you call `/api/analyze`.
 
-**Cause**: `SOC_API_KEY` is set in Replit Secrets, but your request is missing `X-API-Key`.
+**Cause**: `SOC_API_KEY` is configured in the SOC backend, but your request is missing `X-API-Key`.
 
 **Fix**: Add the header to your request:
 ```bash
-curl -X POST https://your-app.replit.app/api/analyze \
+curl -X POST https://your-soc-server.example.com/api/analyze \
   -H "X-API-Key: your-soc-api-key" \
   -H "Content-Type: application/json" \
   -d '{"description": "..."}'
 ```
 
-Or if you do not need auth for testing: remove `SOC_API_KEY` from Replit Secrets.
+Or if you do not need auth for testing: remove `SOC_API_KEY` from the SOC backend's environment.
 
 ---
 
@@ -205,7 +205,7 @@ Or if you do not need auth for testing: remove `SOC_API_KEY` from Replit Secrets
 **Fix**:
 - Wait `retry_after_seconds` seconds and retry.
 - For local development, increase the limit in the engine's `.env`: `RATE_LIMIT_REQUESTS=120`
-- For the SOC backend, set `RATE_LIMIT_MAX=120` in Replit Secrets.
+- For the SOC backend, set `RATE_LIMIT_MAX=120` in the SOC backend's environment.
 - To disable rate limiting entirely in the engine: `RATE_LIMIT_ENABLED=false` in `.env`.
 
 ---

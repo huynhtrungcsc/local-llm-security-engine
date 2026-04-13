@@ -8,10 +8,10 @@ This document explains how all the pieces of this system fit together: what runs
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  CLOUD (Replit)                                                           │
+│  CLOUD (your server — VPS, dedicated, or any networked machine)           │
 │                                                                           │
 │  SOC API Server  (Express / TypeScript)                                   │
-│  artifacts/api-server/                                                    │
+│  soc-backend/                                                             │
 │                                                                           │
 │  Receives alerts from SIEM, analyst tools, or your own automation.       │
 │  Applies inbound auth, rate limiting, and input validation.              │
@@ -58,7 +58,7 @@ This document explains how all the pieces of this system fit together: what runs
 
 | Component | Where it runs | Who manages it |
 |---|---|---|
-| SOC API Server | Replit (cloud) | Replit workflow |
+| SOC API Server | Cloud server or networked machine | System service / process manager |
 | Cloudflare Tunnel | Your local machine | You (run `cloudflared`) |
 | Local LLM Security Engine | Your local machine | You (run `uvicorn`) |
 | Ollama | Your local machine | Ollama (background service) |
@@ -70,12 +70,12 @@ The SOC backend is in the cloud. Everything else is on your machine. **No event 
 
 ## What Cloudflare Tunnel does
 
-Replit runs in the cloud. Your Local LLM Security Engine runs on your local machine behind a firewall. These two cannot communicate directly.
+The SOC API Server runs on a networked server (cloud VPS, dedicated server, or any machine the SOC backend is deployed on). Your Local LLM Security Engine runs on your local machine behind a firewall. These two cannot communicate directly.
 
 Cloudflare Tunnel bridges the gap:
 
 ```
-Replit (cloud) → Cloudflare servers → Cloudflare Tunnel daemon → localhost:8000
+Cloud server → Cloudflare servers → Cloudflare Tunnel daemon → localhost:8000
 ```
 
 The tunnel daemon runs on your machine and creates an outbound connection to Cloudflare's servers. When the SOC backend sends a request to the tunnel URL, Cloudflare forwards it through that connection to your local engine. No firewall rules or port forwarding are needed — the connection is initiated from your machine, not from outside.
