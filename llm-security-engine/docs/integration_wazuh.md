@@ -252,8 +252,9 @@ def call_soc_backend(alert_body: dict, alert_id: str) -> dict | None:
             timeout=120,  # Ollama inference can take up to 90s on CPU
         )
         if resp.status_code == 429:
-            retry = resp.json().get("retry_after_seconds", 60)
-            print(f"[WARN] Rate limited — waiting {retry}s")
+            # SOC backend signals rate limit via Retry-After header, not body
+            retry = int(resp.headers.get("Retry-After", "60"))
+            print(f"[WARN] Rate limited — sleeping {retry}s")
             time.sleep(retry)
             return None
         if resp.status_code == 422:
@@ -286,6 +287,7 @@ def write_enrichment(alert_id: str, wazuh_alert: dict, analysis: dict) -> None:
         "false_positive_likelihood": analysis["false_positive_likelihood"],
         "reason":                    analysis["reason"],
         "fallback_used":             analysis["fallback_used"],
+        "contract_validation_failed": analysis.get("contract_validation_failed", False),
         "model_used":                analysis.get("model_used"),
         "latency_ms":                analysis.get("latency_ms"),
     }

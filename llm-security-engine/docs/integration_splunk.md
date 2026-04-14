@@ -236,7 +236,8 @@ def call_soc_backend(body: dict, event_hash: str) -> dict | None:
         resp = requests.post(f"{SOC_URL}/api/analyze", json=body,
                              headers=headers, timeout=120)
         if resp.status_code == 429:
-            retry = resp.json().get("retry_after_seconds", 60)
+            # SOC backend signals rate limit via Retry-After header, not body
+            retry = int(resp.headers.get("Retry-After", "60"))
             print(f"[WARN] Rate limited — sleeping {retry}s")
             time.sleep(retry)
             return None
@@ -265,6 +266,7 @@ def write_to_hec(event: dict, analysis: dict) -> None:
             "false_positive_likelihood": analysis["false_positive_likelihood"],
             "reason":                    analysis["reason"],
             "fallback_used":             analysis["fallback_used"],
+            "contract_validation_failed": analysis.get("contract_validation_failed", False),
             "model_used":                analysis.get("model_used"),
             "latency_ms":                analysis.get("latency_ms"),
         },
@@ -456,6 +458,13 @@ index=soc_enrichments
 index=soc_enrichments false_positive_likelihood>0.6
 | table ts, splunk_rule_name, reason
 | sort -ts
+```
+
+**Find results where engine had trouble parsing model output (useful for model tuning):**
+
+```spl
+index=soc_enrichments contract_validation_failed=true
+| table ts, splunk_rule_name, fallback_used
 ```
 
 **Correlate enrichment with the original notable event by `event_hash`:**

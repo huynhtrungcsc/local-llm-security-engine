@@ -274,7 +274,8 @@ def call_soc_backend(body: dict, alert_uuid: str) -> dict | None:
         resp = requests.post(f"{SOC_URL}/api/analyze", json=body,
                              headers=headers, timeout=120)
         if resp.status_code == 429:
-            retry = resp.json().get("retry_after_seconds", 60)
+            # SOC backend signals rate limit via Retry-After header, not body
+            retry = int(resp.headers.get("Retry-After", "60"))
             print(f"[WARN] Rate limited — sleeping {retry}s")
             time.sleep(retry)
             return None
@@ -300,6 +301,7 @@ def write_enrichment(alert_uuid: str, alert: dict, analysis: dict) -> None:
         "false_positive_likelihood": analysis["false_positive_likelihood"],
         "reason":                    analysis["reason"],
         "fallback_used":             analysis["fallback_used"],
+        "contract_validation_failed": analysis.get("contract_validation_failed", False),
         "model_used":                analysis.get("model_used"),
         "latency_ms":                analysis.get("latency_ms"),
     }
@@ -376,6 +378,17 @@ attack_classification : "lateral_movement"     → high-priority findings
 false_positive_likelihood > 0.7                → tune your detection rules
 fallback_used : true                            → engine was unreachable, review manually
 ```
+
+**Key response fields to watch:**
+
+| Field | Meaning |
+|---|---|
+| `fallback_used` | `true` = engine failed or returned invalid output. Do not auto-escalate these. |
+| `contract_validation_failed` | `true` = engine returned HTTP 200 but invalid JSON. Engine was reachable, but output was garbage. Combined with `engine_reachable: true`, this tells you the model is running but misbehaving (try a different model or a shorter prompt). |
+| `engine_reachable` | `false` = network/timeout failure reaching the Python engine. |
+| `attack_classification` | One of: `reconnaissance`, `credential_access`, `initial_access`, `lateral_movement`, `command_and_control`, `benign`, `unknown`. |
+| `risk_score` | 0–100. Secondary triage signal — use alongside Elastic's own `risk_score`. |
+| `false_positive_likelihood` | 0–1. High value (> 0.6) = likely benign noise. Use to tune detection rules. |
 
 **Correlate with the original Elastic SIEM alert:**
 
