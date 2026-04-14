@@ -12,7 +12,7 @@ This guide explains two ways to connect Splunk to the Local LLM Security Engine:
 Splunk Indexers
         │ logs indexed
         ▼
-Splunk Correlation Searches → Notable Events (in itsi_notable_events or similar)
+Splunk Correlation Searches → Notable Events (index=notable)
         │
 ┌───────┘  poll via Splunk REST API
 ▼
@@ -40,7 +40,7 @@ Splunk dashboard / Enterprise Security (ES) case enrichment
 Splunk alert fires
         │ POST (custom alert action)
         ▼
-SOC Backend → Engine → Analysis result → HEC back to Splunk
+Webhook adapter (Flask) → SOC Backend → Engine → Analysis result → HEC back to Splunk
 ```
 
 ---
@@ -48,10 +48,17 @@ SOC Backend → Engine → Analysis result → HEC back to Splunk
 ## Prerequisites
 
 - Splunk Enterprise 8.x or 9.x (or Splunk Cloud)
-- Splunk Enterprise Security (optional, for notable events)
+- Splunk Enterprise Security (recommended, for notable events)
 - SOC backend running: `pnpm run dev` (port 3000)
 - LLM Security Engine running: `uvicorn app.main:app --port 8000`
-- Python 3.10+ with packages: `pip install splunk-sdk requests`
+- Python 3.10+ with packages (Option A):
+  ```bash
+  pip install splunk-sdk requests
+  ```
+- Python packages (Option B adds Flask):
+  ```bash
+  pip install splunk-sdk requests flask
+  ```
 - Splunk HTTP Event Collector (HEC) enabled (to write results back)
 - Splunk user with `search` capability and access to relevant indexes
 
@@ -64,30 +71,33 @@ HEC lets the integration script write analysis results back to Splunk.
 1. Splunk Web → Settings → Data inputs → HTTP Event Collector → Add new
 2. Name: `soc-enrichments`, Source type: `_json`
 3. Copy the generated **HEC token**
-4. Settings → HTTP Event Collector → Global Settings → set port to `8088` (default)
+4. Settings → HTTP Event Collector → Global Settings → Default index: `soc_enrichments` (create this index first if it doesn't exist)
 
-Note the HEC token — you will need it in the integration script.
+Default HEC port is `8088`. Note the HEC token — you will need it in the integration script.
 
 ---
 
-## Step 2 — Understand Splunk notable events / search results
+## Step 2 — Understand Splunk notable events
 
-Splunk notable events (from Splunk ES correlation searches) are stored in `notable` index. A typical search result:
+Splunk notable events (from Splunk ES correlation searches) are stored in the `notable` index. When searched via the REST API, a typical result looks like:
 
 ```
-rule_name=Brute Force Access Behavior Detected
-src=192.168.1.100
-dest=10.0.0.5
-user=jdoe
-urgency=high
-event_category=Authentication
-count=147
-first_time=2024-01-15T14:00:00.000Z
-last_time=2024-01-15T14:23:00.000Z
-event_id=abc123def456
+rule_name         = Brute Force Access Behavior Detected
+src               = 192.168.1.100
+dest              = 10.0.0.5
+user              = jdoe
+urgency           = high
+event_category    = Authentication
+count             = 147
+first_time        = 2024-01-15T14:00:00.000Z
+last_time         = 2024-01-15T14:23:00.000Z
+_time             = 2024-01-15T14:23:00.000Z
+event_hash        = abc123def456
 ```
 
-If you are not using Splunk ES, you can query any Splunk search that produces structured events.
+The field `event_hash` is the unique identifier for Splunk ES notable events. `_time` is the standard Splunk event timestamp.
+
+If you are not using Splunk ES, adapt the SPL search in the script to match your data.
 
 ---
 
@@ -100,7 +110,7 @@ If you are not using Splunk ES, you can query any Splunk search that produces st
 | `destination_ip`     | No       | `dest`                                      |
 | `event_type`         | No       | `event_category` or `type`                  |
 | `severity`           | No       | `urgency` (low/medium/high/critical)        |
-| `timestamp`          | No       | `last_time` (ISO 8601)                      |
+| `timestamp`          | No       | `_time` or `last_time` (ISO 8601)           |
 | `additional_context` | No       | `user`, `count`, `first_time`, `src_zone`   |
 
 **Building a good `description`:**
@@ -111,7 +121,7 @@ If you are not using Splunk ES, you can query any Splunk search that produces st
 
 # Better:
 "Brute force attack detected: 147 failed login attempts for user jdoe "
-"from source IP 192.168.1.100 to 10.0.0.5 over a 23-minute window. "
+"from source IP 192.168.1.100 to destination 10.0.0.5 over a 23-minute window. "
 "Splunk ES rule: Brute Force Access Behavior Detected (urgency: high)"
 ```
 
@@ -133,95 +143,93 @@ Usage:
     python splunk_integration.py
 
 Environment variables:
-    SPLUNK_HOST           Splunk host (default: localhost)
+    SPLUNK_HOST           Splunk management host (default: localhost)
     SPLUNK_PORT           Splunk management port (default: 8089)
     SPLUNK_USER           Splunk username
     SPLUNK_PASS           Splunk password
-    SPLUNK_TOKEN          Splunk session token (alternative to user/pass)
-    HEC_URL               HEC endpoint (default: http://localhost:8088)
-    HEC_TOKEN             HEC authentication token
+    SPLUNK_HEC_URL        HEC endpoint (default: http://localhost:8088/services/collector)
+    SPLUNK_HEC_TOKEN      HEC token (from Step 1)
     SOC_BACKEND_URL       SOC backend URL (default: http://localhost:3000)
     SOC_API_KEY           SOC backend API key (optional)
-    MIN_URGENCY           Minimum urgency: low|medium|high|critical (default: medium)
+    URGENCY_MIN           Minimum urgency to process: low/medium/high/critical (default: high)
     POLL_INTERVAL_SEC     Seconds between polls (default: 60)
 """
 
 import os
 import time
+import json
 import datetime
 import requests
-import splunklib.client as splunk_client
-import splunklib.results as splunk_results
+import splunklib.client as client
+import splunklib.results as results
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-SPLUNK_HOST = os.environ.get("SPLUNK_HOST", "localhost")
-SPLUNK_PORT = int(os.environ.get("SPLUNK_PORT", "8089"))
-SPLUNK_USER = os.environ.get("SPLUNK_USER", "admin")
-SPLUNK_PASS = os.environ.get("SPLUNK_PASS", "")
-HEC_URL     = os.environ.get("HEC_URL",     "http://localhost:8088/services/collector/event")
-HEC_TOKEN   = os.environ.get("HEC_TOKEN",   "")
-SOC_URL     = os.environ.get("SOC_BACKEND_URL", "http://localhost:3000")
-SOC_KEY     = os.environ.get("SOC_API_KEY",     "")
-POLL_SEC    = int(os.environ.get("POLL_INTERVAL_SEC", "60"))
+SPLUNK_HOST  = os.environ.get("SPLUNK_HOST",      "localhost")
+SPLUNK_PORT  = int(os.environ.get("SPLUNK_PORT",  "8089"))
+SPLUNK_USER  = os.environ.get("SPLUNK_USER",      "admin")
+SPLUNK_PASS  = os.environ.get("SPLUNK_PASS",      "changeme")
+HEC_URL      = os.environ.get("SPLUNK_HEC_URL",   "http://localhost:8088/services/collector")
+HEC_TOKEN    = os.environ.get("SPLUNK_HEC_TOKEN",  "")
+SOC_URL      = os.environ.get("SOC_BACKEND_URL",   "http://localhost:3000")
+SOC_KEY      = os.environ.get("SOC_API_KEY",        "")
+URGENCY_MIN  = os.environ.get("URGENCY_MIN",        "high")
+POLL_SEC     = int(os.environ.get("POLL_INTERVAL_SEC", "60"))
 
-URGENCY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
-MIN_URGENCY  = os.environ.get("MIN_URGENCY", "medium")
-MIN_RANK     = URGENCY_RANK.get(MIN_URGENCY, 1)
+# Urgency ranking for filtering — only process events at or above URGENCY_MIN
+URGENCY_RANK = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+MIN_RANK     = URGENCY_RANK.get(URGENCY_MIN.lower(), 3)
 
 # ── Splunk client ─────────────────────────────────────────────────────────────
 
-service = splunk_client.connect(
+service = client.connect(
     host=SPLUNK_HOST,
     port=SPLUNK_PORT,
     username=SPLUNK_USER,
     password=SPLUNK_PASS,
 )
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+# ── Helper functions ──────────────────────────────────────────────────────────
+
+def urgency_to_soc(urgency: str) -> str:
+    return {"low": "low", "medium": "medium", "high": "high",
+            "critical": "critical"}.get(urgency.lower(), "medium")
 
 def build_description(event: dict) -> str:
-    rule_name  = event.get("rule_name")   or event.get("search_name", "Unknown Splunk alert")
-    urgency    = event.get("urgency",     "")
-    src        = event.get("src",         "")
-    dest       = event.get("dest",        "")
-    user       = event.get("user",        "")
-    count      = event.get("count",       "")
-    first_time = event.get("first_time",  "")
-    last_time  = event.get("last_time",   "")
+    rule_name = event.get("rule_name", "Unknown Splunk rule")
+    urgency   = event.get("urgency",  "unknown")
+    src       = event.get("src",      "")
+    dest      = event.get("dest",     "")
+    user      = event.get("user",     "")
+    count     = event.get("count",    "")
 
-    parts = [f"Splunk ES notable event: {rule_name}"]
-    if user:       parts.append(f"for user {user}")
-    if src:        parts.append(f"from source IP {src}")
-    if dest:       parts.append(f"to destination {dest}")
-    if count:      parts.append(f"occurred {count} times")
-    if first_time and last_time:
-        parts.append(f"between {first_time} and {last_time}")
-    if urgency:    parts.append(f"Urgency: {urgency}")
-
+    parts = [f"Splunk ES alert: {rule_name}"]
+    if src:   parts.append(f"from source IP {src}")
+    if dest:  parts.append(f"to destination {dest}")
+    if user:  parts.append(f"involving user {user}")
+    if count: parts.append(f"event count: {count}")
+    parts.append(f"urgency: {urgency}")
     return ". ".join(parts)
 
-def build_additional_context(event: dict) -> str | None:
-    ctx = []
-    if event.get("user"):       ctx.append(f"User: {event['user']}")
-    if event.get("src_zone"):   ctx.append(f"Source zone: {event['src_zone']}")
-    if event.get("dest_zone"):  ctx.append(f"Dest zone: {event['dest_zone']}")
-    if event.get("signature"):  ctx.append(f"Signature: {event['signature']}")
-    return ". ".join(ctx) if ctx else None
-
 def build_soc_alert(event: dict) -> dict:
+    ctx_parts = []
+    for field in ("user", "count", "first_time", "src_zone", "dest_zone", "category"):
+        val = event.get(field)
+        if val:
+            ctx_parts.append(f"{field}: {val}")
+
     return {
         "description":        build_description(event),
-        "source_ip":          event.get("src")           or None,
-        "destination_ip":     event.get("dest")          or None,
+        "source_ip":          event.get("src")   or None,
+        "destination_ip":     event.get("dest")  or None,
         "event_type":         event.get("event_category") or event.get("type") or None,
-        "severity":           event.get("urgency")        or None,
-        "timestamp":          event.get("last_time")      or None,
-        "additional_context": build_additional_context(event),
+        "severity":           urgency_to_soc(event.get("urgency", "medium")),
+        "timestamp":          event.get("_time") or event.get("last_time") or None,
+        "additional_context": ". ".join(ctx_parts) or None,
     }
 
-def call_soc_backend(body: dict, event_id: str) -> dict | None:
-    headers = {"Content-Type": "application/json", "X-Request-ID": event_id}
+def call_soc_backend(body: dict, event_hash: str) -> dict | None:
+    headers = {"Content-Type": "application/json", "X-Request-ID": event_hash}
     if SOC_KEY:
         headers["X-API-Key"] = SOC_KEY
     try:
@@ -233,26 +241,25 @@ def call_soc_backend(body: dict, event_id: str) -> dict | None:
             time.sleep(retry)
             return None
         if resp.status_code in (422, 503):
-            print(f"[WARN] {resp.status_code} for event {event_id}: {resp.text[:200]}")
+            print(f"[WARN] {resp.status_code} for event {event_hash}: {resp.text[:200]}")
             return None
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
-        print(f"[ERROR] SOC backend error for {event_id}: {e}")
+        print(f"[ERROR] SOC backend error for {event_hash}: {e}")
         return None
 
-def write_to_hec(event_id: str, splunk_event: dict, analysis: dict) -> None:
-    if not HEC_TOKEN:
-        print(f"[SKIP] HEC_TOKEN not set — not writing result for {event_id}")
-        return
+def write_to_hec(event: dict, analysis: dict) -> None:
     payload = {
-        "time":       time.time(),
-        "sourcetype": "soc_enrichment",
+        "time":       datetime.datetime.now(datetime.timezone.utc).timestamp(),
+        "sourcetype": "_json",
         "index":      "soc_enrichments",
         "event": {
-            "splunk_event_id":           event_id,
-            "splunk_rule_name":          splunk_event.get("rule_name") or splunk_event.get("search_name"),
-            "splunk_urgency":            splunk_event.get("urgency"),
+            "ts":                        datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "splunk_rule_name":          event.get("rule_name"),
+            "splunk_event_hash":         event.get("event_hash"),
+            "splunk_urgency":            event.get("urgency"),
+            "splunk_src":                event.get("src"),
             "attack_classification":     analysis["attack_classification"],
             "risk_score":                analysis["risk_score"],
             "false_positive_likelihood": analysis["false_positive_likelihood"],
@@ -260,60 +267,76 @@ def write_to_hec(event_id: str, splunk_event: dict, analysis: dict) -> None:
             "fallback_used":             analysis["fallback_used"],
             "model_used":                analysis.get("model_used"),
             "latency_ms":                analysis.get("latency_ms"),
-            "ts":                        datetime.datetime.utcnow().isoformat() + "Z",
-        }
+        },
     }
-    try:
-        resp = requests.post(
-            HEC_URL, json=payload,
-            headers={"Authorization": f"Splunk {HEC_TOKEN}"},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        print(f"[OK] {event_id[:12]}… → {analysis['attack_classification']} "
-              f"(risk={analysis['risk_score']}, fallback={analysis['fallback_used']})")
-    except Exception as e:
-        print(f"[ERROR] HEC write failed for {event_id}: {e}")
-
-def search_notable_events(earliest: str) -> list[dict]:
-    """Search for Splunk ES notable events above MIN_URGENCY since `earliest`."""
-    spl = (
-        f"search index=notable earliest={earliest} latest=now "
-        f"| eval urgency_rank=case(urgency=\"low\",0, urgency=\"medium\",1, "
-        f"urgency=\"high\",2, urgency=\"critical\",3, true(),0) "
-        f"| where urgency_rank>={MIN_RANK} "
-        f"| fields rule_name,search_name,src,dest,user,urgency,event_category,"
-        f"type,count,first_time,last_time,event_id,src_zone,dest_zone,signature "
-        f"| sort +_time | head 50"
+    resp = requests.post(
+        HEC_URL,
+        headers={"Authorization": f"Splunk {HEC_TOKEN}"},
+        json=payload,
+        timeout=10,
     )
-    job = service.jobs.create(spl, exec_mode="blocking")
-    results = []
-    for result in splunk_results.JSONResultsReader(job.results(output_mode="json")):
-        if isinstance(result, dict):
-            results.append(result)
-    return results
+    resp.raise_for_status()
+    rule = event.get("rule_name", "?")[:40]
+    print(f"[OK] {rule!r} → {analysis['attack_classification']} "
+          f"(risk={analysis['risk_score']}, fallback={analysis['fallback_used']})")
 
-# ── Main loop ─────────────────────────────────────────────────────────────────
+def search_notable_events(earliest_epoch: int) -> list[dict]:
+    """
+    Search Splunk for notable events since `earliest_epoch` (Unix timestamp).
+
+    Using an absolute epoch timestamp — not a relative modifier like "-1m" —
+    ensures no events are missed even if a poll cycle takes a long time.
+    """
+    spl = (
+        f"search index=notable earliest={earliest_epoch} latest=now "
+        f"| where urgency IN (\"high\", \"critical\") "
+        f"| fields rule_name, src, dest, user, urgency, event_category, "
+        f"         count, first_time, last_time, _time, event_hash"
+    )
+
+    job = service.jobs.create(spl, exec_mode="blocking")
+    reader = results.JSONResultsReader(job.results(output_mode="json"))
+
+    events = []
+    for item in reader:
+        if isinstance(item, dict):
+            urgency = item.get("urgency", "").lower()
+            if URGENCY_RANK.get(urgency, 0) >= MIN_RANK:
+                events.append(item)
+    return events
+
+# ── Main polling loop ─────────────────────────────────────────────────────────
 
 def main():
-    print(f"Starting Splunk integration: polling every {POLL_SEC}s, min urgency: {MIN_URGENCY}")
+    print(f"Splunk integration: polling every {POLL_SEC}s, urgency >= {URGENCY_MIN}")
     print(f"Splunk: {SPLUNK_HOST}:{SPLUNK_PORT}  |  SOC backend: {SOC_URL}")
 
-    earliest = "-5m"  # Start from 5 minutes ago on first run
+    # Track absolute epoch timestamp. Using relative modifiers ("-1m", "-5m")
+    # would miss events if a poll cycle takes longer than the modifier window.
+    last_poll_epoch = int(
+        (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=5)).timestamp()
+    )
 
     while True:
-        events = search_notable_events(earliest)
-        print(f"Found {len(events)} notable events (urgency >= {MIN_URGENCY})")
+        poll_start_epoch = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+        try:
+            events = search_notable_events(last_poll_epoch)
+            print(f"Found {len(events)} notable events (urgency >= {URGENCY_MIN})")
 
-        for event in events:
-            event_id  = event.get("event_id") or event.get("rule_name", "unknown")
-            soc_alert = build_soc_alert(event)
-            analysis  = call_soc_backend(soc_alert, str(event_id))
-            if analysis:
-                write_to_hec(str(event_id), event, analysis)
-            time.sleep(2)  # pace requests — Ollama inference takes 15-60s on CPU
+            for event in events:
+                event_hash = event.get("event_hash") or str(hash(str(event)))
+                soc_alert  = build_soc_alert(event)
+                analysis   = call_soc_backend(soc_alert, event_hash)
+                if analysis and HEC_TOKEN:
+                    write_to_hec(event, analysis)
+                time.sleep(2)  # pace requests
 
-        earliest = "-1m"  # Switch to 1-minute window after first poll
+        except Exception as e:
+            print(f"[ERROR] Poll cycle failed: {e}")
+
+        # Advance window. Subtract 10 seconds overlap to avoid missing events at
+        # the boundary caused by clock skew or Splunk indexing lag.
+        last_poll_epoch = poll_start_epoch - 10
         time.sleep(POLL_SEC)
 
 if __name__ == "__main__":
@@ -322,73 +345,90 @@ if __name__ == "__main__":
 
 ---
 
-## Step 5 — Option B: Splunk Custom Alert Action (webhook)
+## Step 5 — Option B: Webhook adapter (Custom Alert Action)
 
-Instead of polling, configure Splunk to call the SOC backend directly when a correlation search fires.
+This approach lets Splunk push alerts to your engine immediately when a correlation search fires, without polling.
 
-1. **Create a Splunk alert** from any search:
-   - Search → Save as Alert → Trigger Actions → Add Actions → Webhook
-   - Webhook URL: `http://localhost:3000/api/analyze`
-   - Note: the webhook body format doesn't match the SOC backend's schema directly
-
-2. **The problem**: Splunk's built-in webhook sends a different JSON structure. You need a thin adapter. Save as `splunk_webhook_adapter.py` and run it on port 5000:
+Save as `splunk_webhook.py`:
 
 ```python
 """
-Thin adapter that receives Splunk webhook payloads and reformats them
-for the SOC backend. Run on port 5000.
+Splunk Custom Alert Action webhook adapter.
+
+Receives POST from Splunk, calls the SOC backend, and writes the result
+back to Splunk via HEC.
 
 Usage:
     pip install flask requests
-    python splunk_webhook_adapter.py
+    python splunk_webhook.py
+    # Runs on port 5000
+
+Configure in Splunk:
+    Alert action → Webhook → URL: http://localhost:5000/webhook
 """
 
+import os
+import json
+import datetime
+import requests
 from flask import Flask, request, jsonify
-import requests, os
 
 app = Flask(__name__)
-SOC_URL = os.environ.get("SOC_BACKEND_URL", "http://localhost:3000")
-SOC_KEY = os.environ.get("SOC_API_KEY", "")
+
+SOC_URL   = os.environ.get("SOC_BACKEND_URL",  "http://localhost:3000")
+SOC_KEY   = os.environ.get("SOC_API_KEY",       "")
+HEC_URL   = os.environ.get("SPLUNK_HEC_URL",   "http://localhost:8088/services/collector")
+HEC_TOKEN = os.environ.get("SPLUNK_HEC_TOKEN",  "")
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    payload = request.get_json(force=True) or {}
-    results = payload.get("result", {})
+    payload = request.get_json(force=True, silent=True) or {}
+    result  = payload.get("result", {})
 
-    # Build description from Splunk's search result fields
-    search_name = payload.get("search_name", "Splunk alert")
-    src   = results.get("src", "")
-    dest  = results.get("dest", "")
-    user  = results.get("user", "")
-    count = results.get("count", "")
-
-    desc_parts = [f"Splunk alert: {search_name}"]
-    if user:  desc_parts.append(f"for user {user}")
-    if src:   desc_parts.append(f"from {src}")
-    if dest:  desc_parts.append(f"to {dest}")
-    if count: desc_parts.append(f"({count} occurrences)")
+    rule_name = result.get("source", "Unknown Splunk alert")
+    src_ip    = result.get("src")  or result.get("src_ip")
+    dest_ip   = result.get("dest") or result.get("dest_ip")
+    urgency   = result.get("urgency", "medium")
 
     soc_alert = {
-        "description":    ". ".join(desc_parts),
-        "source_ip":      src  or None,
-        "destination_ip": dest or None,
-        "severity":       results.get("urgency") or None,
-        "timestamp":      results.get("_time")   or None,
+        "description": (
+            f"Splunk alert: {rule_name}. "
+            f"Source IP: {src_ip}. Urgency: {urgency}."
+        ),
+        "source_ip":      src_ip,
+        "destination_ip": dest_ip,
+        "severity":       urgency,
     }
 
     headers = {"Content-Type": "application/json"}
     if SOC_KEY:
         headers["X-API-Key"] = SOC_KEY
 
-    resp = requests.post(f"{SOC_URL}/api/analyze", json=soc_alert,
-                         headers=headers, timeout=120)
-    return jsonify(resp.json()), resp.status_code
+    try:
+        resp = requests.post(f"{SOC_URL}/api/analyze", json=soc_alert,
+                             headers=headers, timeout=120)
+        resp.raise_for_status()
+        analysis = resp.json()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    if HEC_TOKEN:
+        hec_payload = {
+            "time":  datetime.datetime.now(datetime.timezone.utc).timestamp(),
+            "index": "soc_enrichments",
+            "event": {**analysis, "splunk_rule_name": rule_name, "splunk_src": src_ip},
+        }
+        requests.post(HEC_URL,
+                      headers={"Authorization": f"Splunk {HEC_TOKEN}"},
+                      json=hec_payload, timeout=10)
+
+    return jsonify({"status": "ok", "classification": analysis.get("attack_classification")}), 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
 ```
 
-Then set the Splunk webhook URL to `http://localhost:5000/webhook`.
+In Splunk: Alerts → Edit → Add actions → Webhook → URL: `http://localhost:5000/webhook`.
 
 ---
 
@@ -403,6 +443,7 @@ index=soc_enrichments
 ```
 
 **Dashboard panel — attack classification breakdown:**
+
 ```spl
 index=soc_enrichments
 | stats count by attack_classification
@@ -410,16 +451,20 @@ index=soc_enrichments
 ```
 
 **Find likely false positives to tune your correlation searches:**
+
 ```spl
 index=soc_enrichments false_positive_likelihood>0.6
 | table ts, splunk_rule_name, reason
+| sort -ts
 ```
 
-**Correlate enrichment with notable event by `event_id`:**
+**Correlate enrichment with the original notable event by `event_hash`:**
+
 ```spl
 index=notable OR index=soc_enrichments
-| eval join_key=coalesce(event_id, splunk_event_id)
+| eval join_key=coalesce(event_hash, splunk_event_hash)
 | stats values(*) as * by join_key
+| where isnotnull(attack_classification)
 ```
 
 ---
@@ -428,16 +473,17 @@ index=notable OR index=soc_enrichments
 
 **`HTTPError: 401` from Splunk REST API:**
 - Check `SPLUNK_USER` and `SPLUNK_PASS`
-- The user needs the `search` role and access to the `notable` index
+- The user needs the `search` role and read access to the `notable` index
 
 **HEC writes fail with `400 Invalid token`:**
 - The HEC token is wrong or HEC is not enabled
 - Verify: Splunk Web → Settings → Data inputs → HTTP Event Collector
+- Test manually: `curl -k http://localhost:8088/services/collector -H "Authorization: Splunk YOUR_TOKEN" -d '{"event": "test"}'`
 
 **No notable events returned:**
-- Splunk ES must have correlation searches enabled and firing
-- Try changing `earliest=-24h` to search a wider window for testing
-- Confirm there are events in: `index=notable | head 5`
+- Splunk ES must have correlation searches enabled and generating alerts
+- Confirm events exist: run `index=notable | head 5` directly in Splunk Search
+- Try widening the search window: temporarily change `last_poll_epoch` to 24 hours ago
 
 **`fallback_used: true` on all results:**
 - LLM engine unreachable: `curl http://localhost:8000/health`
